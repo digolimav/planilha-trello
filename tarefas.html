@@ -12,7 +12,6 @@ body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
 #app{padding:16px 20px 40px}
 button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-select,input{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
 .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
 .bar .sp{flex:1}
 .week{display:inline-flex;align-items:center;gap:6px;font-weight:600}
@@ -44,57 +43,41 @@ select,input{font:inherit;padding:5px 8px;border:1px solid var(--line);border-ra
 .tname a{color:var(--ink);text-decoration:none;font-weight:500;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tname a:hover{text-decoration:underline}
 .lab{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;font-weight:500;margin-right:4px}
-.right{display:flex;gap:6px;align-items:center}
+.post{font-size:11px;color:var(--muted)}
 .pill{border:0;border-radius:999px;padding:3px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
 .pill.ro{cursor:default}
-select.who{font-size:12px;padding:2px 4px}
 .empty{padding:10px 14px;color:var(--muted);font-size:13px}
 .menu{position:fixed;z-index:50;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(9,30,66,.2);padding:6px;min-width:170px}
 .menu button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:0;background:transparent;padding:4px 6px;border-radius:6px;text-align:left}
 .menu button:hover,.menu button:focus{background:var(--soft);outline:none}
 .menu .chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:13px}
-table.cfg{border-collapse:collapse;width:100%;margin-top:8px}
-table.cfg th,table.cfg td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;font-size:13px}
-table.cfg th{background:var(--soft);font-weight:600}
-table.cfg select{width:100%}
-.offs{display:flex;flex-wrap:wrap;gap:12px;margin:10px 0}
-.offs label{display:flex;gap:6px;align-items:center;font-size:13px}
-.offs input{width:60px}
+.gate{max-width:520px;margin:40px auto;text-align:center}
+.gate p{margin:0 0 14px}
 </style>
 </head>
 <body>
 <div id="app"><p class="note">Carregando…</p></div>
 <script>
+/* As tarefas vêm do checklist de produção de cada cartão: o item, a pessoa colocada nele e a data dele. */
 var APP_KEY = "d7dce7c9a2c664af9701e49ee088a979";
 var APP_NAME = "Planilha Projeto Curioso";
 var t = TrelloPowerUp.iframe({ appKey: APP_KEY, appName: APP_NAME });
 var app = document.getElementById("app");
 
-var PEOPLE = ["Rodrigo", "Lucas", "Lázaro", "Vinny", "Latexi", "Helen", "Matheus", "Robert"];
-/* quem pode ver as tarefas de todo mundo; o resto vê só as próprias */
-var ADMINS = ["Rodrigo"];
-/* como reconhecer cada pessoa pelo nome da conta no Trello */
-var MATCH = { Rodrigo: /rodrigo/i, Lucas: /^lucas/i, "Lázaro": /l[aá]zaro/i, Vinny: /vinn?y/i, Latexi: /l[aá]texi/i, Helen: /helen/i, Matheus: /matt|matheus nunes/i, Robert: /robert/i };
-var STAGES = [
-  { k: "R", n: "Roteiro", sec: "Roteiros", f: /roteir/i },
-  { k: "T", n: "Tradução", sec: "Traduções", f: /tradu/i },
-  { k: "H", n: "Thumb", sec: "Thumbs", f: /thumb/i },
-  { k: "E", n: "Edição", sec: "Edições", f: /edi[cç]/i },
-  { k: "V", n: "Revisão", sec: "Revisões", f: null },
-  { k: "P", n: "Postagem", sec: "Postagens", f: /publica/i }
+/* quem vê as tarefas de todo mundo (pelo nome da conta no Trello); o resto vê só as próprias */
+var ADMINS = [/rodrigo/i];
+/* checklists que não são tarefa de produção */
+var IGNORE_CHECKLIST = /aprova/i;
+/* ordem e nome das seções; o item do checklist cai na seção pelo começo do nome */
+var SECTIONS = [
+  { k: "R", n: "Roteiros", re: /^roteiro/i, f: /roteir/i },
+  { k: "T", n: "Traduções", re: /^tradu/i, f: /tradu/i },
+  { k: "H", n: "Thumbs", re: /^thumb/i, f: /thumb/i },
+  { k: "E", n: "Edições", re: /^(edi[cç]|montagem)/i, f: /edi[cç]/i },
+  { k: "V", n: "Revisões", re: /^revis/i, f: null },
+  { k: "P", n: "Postagens", re: /^(postagem|publica)/i, f: /publica/i },
+  { k: "O", n: "Outras", re: /./, f: null }
 ];
-var DEFAULT_CFG = {
-  off: { R: 4, T: 4, H: 1, E: 1, V: 0, P: 0 },
-  rules: {
-    celebsgoat: { R: "Helen", H: "Robert", E: "Lázaro", P: "Lázaro" },
-    dunkergoat: { R: "Helen", H: "Robert", E: "Lucas", P: "Lucas" },
-    imnotarobot: { R: "Matheus", H: "Rodrigo", E: "Vinny", V: "Lucas", P: "Lucas" },
-    nosoyrobot: { H: "Rodrigo", E: "Vinny", V: "Lucas", P: "Lucas" },
-    therobotman: { R: "Matheus", H: "Rodrigo", E: "Latexi", V: "Lucas", P: "Lucas" },
-    rightturn: { R: "Helen", H: "Rodrigo", E: "Lucas", P: "Lucas" },
-    mysteryrobot: { E: "Lucas", P: "Lucas" }
-  }
-};
 var COLORS = {
   green: ["#4bce97", "#0d2e20"], yellow: ["#f5cd47", "#3d2e00"], orange: ["#fea362", "#4a1f00"],
   red: ["#f87168", "#4a120d"], purple: ["#9f8fef", "#231c47"], blue: ["#579dff", "#06224a"],
@@ -112,86 +95,60 @@ function h(tag, attrs, kids) {
     else if (k.slice(0, 2) === "on") el.addEventListener(k.slice(2), attrs[k]);
     else el.setAttribute(k, attrs[k] === true ? "" : attrs[k]);
   }
-  (kids || []).forEach(function (c) { if (c != null) el.append(c.nodeType ? c : document.createTextNode(c)); });
+  (kids || []).forEach(function (c) { if (c != null && c !== "") el.append(c.nodeType ? c : document.createTextNode(c)); });
   return el;
 }
-function norm(s) { return (s || "").toLowerCase().normalize("NFD").replace(/[^a-z]/g, ""); }
 function monday(x) { var d = new Date(x.getFullYear(), x.getMonth(), x.getDate()); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d; }
 function addDays(x, n) { var d = new Date(x); d.setDate(d.getDate() + n); return d; }
+function day(x) { return new Date(x.getFullYear(), x.getMonth(), x.getDate()); }
 function dd(x) { return String(x.getDate()).padStart(2, "0") + "/" + String(x.getMonth() + 1).padStart(2, "0"); }
+function first(name) { return (name || "").trim().split(/\s+/)[0].replace(/^./, function (c) { return c.toUpperCase(); }); }
 
-var S = { cfg: null, resp: {}, me: null, view: "tarefas", person: null, week: 0, token: null };
+var S = { person: null, week: 0, token: null };
 
 async function load() {
   try {
     var r = await Promise.all([
       t.board("id", "labels", "customFields", "members"),
-      t.lists("id", "name"),
-      t.cards("id", "name", "labels", "idList", "url", "customFieldItems"),
+      t.cards("id", "name", "labels", "idList", "url", "customFieldItems", "closed"),
       t.member("id", "fullName"),
-      t.get("board", "shared", "cfg"),
-      t.get("board", "shared", "resp"),
       t.get("board", "private", "tarefas")
     ]);
-    S.board = r[0]; S.lists = r[1]; S.cards = r[2]; S.member = r[3];
-    S.cfg = r[4] || JSON.parse(JSON.stringify(DEFAULT_CFG));
-    S.resp = r[5] || {};
+    S.board = r[0]; S.cards = r[1]; S.member = r[2];
+    S.admin = ADMINS.some(function (re) { return re.test(S.member.fullName || ""); });
+    var pref = r[3] || {};
+    S.person = S.admin ? (pref.person || "") : S.member.id;
     var cfs = S.board.customFields || [];
     S.postField = cfs.find(function (f) { return f.type === "date" && /postag/i.test(f.name); });
-    STAGES.forEach(function (s) { s.field = s.f ? cfs.find(function (f) { return f.type === "list" && s.f.test(f.name); }) : null; });
-    S.editField = STAGES.find(function (s) { return s.k === "E"; }).field;
-    S.me = PEOPLE.find(function (p) { return MATCH[p].test(S.member.fullName || ""); }) || null;
-    var pref = r[6] || {};
-    S.admin = ADMINS.indexOf(S.me) >= 0;
-    S.person = S.admin ? (pref.person !== undefined ? pref.person : "") : (S.me || "?");
+    SECTIONS.forEach(function (s) { s.field = s.f ? cfs.find(function (f) { return f.type === "list" && s.f.test(f.name); }) : null; });
+    S.editField = SECTIONS.find(function (s) { return s.k === "E"; }).field;
     try { if (await t.getRestApi().isAuthorized()) S.token = await t.getRestApi().getToken(); } catch (e) {}
+    if (!S.token) return renderGate();
+    var cr = await fetch("https://api.trello.com/1/boards/" + S.board.id + "/cards?fields=id&checklists=all&checklist_fields=name,pos&key=" + APP_KEY + "&token=" + S.token);
+    if (cr.status === 401) { S.token = null; return renderGate(); }
+    if (!cr.ok) throw new Error(cr.status);
     S.checks = {};
-    if (S.token) {
-      try {
-        var cr = await fetch("https://api.trello.com/1/boards/" + S.board.id + "/cards?fields=id&checklists=all&checklist_fields=name,pos&key=" + APP_KEY + "&token=" + S.token);
-        if (cr.ok) (await cr.json()).forEach(function (c) { S.checks[c.id] = c.checklists || []; });
-      } catch (e) {}
-    }
+    (await cr.json()).forEach(function (c) { S.checks[c.id] = c.checklists || []; });
     render();
   } catch (e) {
     app.replaceChildren(h("p", { class: "err", text: "Não foi possível ler o quadro: " + (e && e.message || e) }));
   }
 }
 
-function channelKey(card) {
-  var keys = Object.keys(S.cfg.rules);
-  for (var i = 0; i < (card.labels || []).length; i++) { var k = norm(card.labels[i].name); if (keys.indexOf(k) >= 0) return k; }
-  return null;
+/* o checklist só pode ser lido com a permissão da pessoa (uma vez só) */
+function renderGate() {
+  app.replaceChildren(h("div", { class: "gate" }, [
+    h("p", { text: "Para ver suas tarefas, libere o acesso uma vez. Depois disso abre direto." }),
+    h("button", { class: "primary", text: "Liberar acesso", onclick: async function () {
+      try { await t.getRestApi().authorize({ scope: "read,write", expiration: "never" }); load(); }
+      catch (e) { app.querySelector(".gate p").textContent = "Acesso não liberado. Tente de novo."; }
+    } })
+  ]));
 }
-function channelLabel(card) {
-  var keys = Object.keys(S.cfg.rules);
-  return (card.labels || []).find(function (l) { return keys.indexOf(norm(l.name)) >= 0; }) || (card.labels || [])[0];
-}
+
+function memberName(id) { var m = (S.board.members || []).find(function (x) { return x.id === id; }); return m ? first(m.fullName) : "Sem conta no quadro"; }
+function channelLabel(card) { return (card.labels || []).find(function (l) { return l.name && !/travado|ingl/i.test(l.name); }) || null; }
 function isSpanish(card) { return (card.labels || []).some(function (l) { return /no soy|esp/i.test(l.name); }) || /^ESP\b/i.test(card.name); }
-function rid(card) { return card.id.slice(-8); }
-/* item do checklist de produção que corresponde a cada etapa */
-function checkItem(card, s) {
-  var lists = (S.checks[card.id] || []).slice().sort(function (a, b) { return a.pos - b.pos; });
-  var items = [];
-  lists.forEach(function (l) { (l.checkItems || []).slice().sort(function (a, b) { return a.pos - b.pos; }).forEach(function (i) { items.push(i); }); });
-  var re = { R: /^roteiro/i, T: /^tradu/i, H: /^thumb/i, E: /^edi[cç]/i, P: /^postagem/i }[s.k];
-  if (re) return items.find(function (i) { return re.test(i.name.trim()); }) || null;
-  if (s.k === "V") { var ie = items.findIndex(function (i) { return /^edi[cç]/i.test(i.name.trim()); }); return ie < 0 ? null : items.slice(ie + 1).find(function (i) { return /^revis/i.test(i.name.trim()); }) || null; }
-  return null;
-}
-function personOfMember(id) {
-  var m = (S.board.members || []).find(function (x) { return x.id === id; });
-  return m ? PEOPLE.find(function (p) { return MATCH[p].test(m.fullName || ""); }) || "" : "";
-}
-function memberOfPerson(p) { return (S.board.members || []).find(function (m) { return MATCH[p] && MATCH[p].test(m.fullName || ""); }); }
-function who(card, s) {
-  var ci = checkItem(card, s);
-  if (ci && ci.idMember) { var pm = personOfMember(ci.idMember); if (pm) return pm; }
-  var o = S.resp[rid(card)];
-  if (o && o[s.k] !== undefined) return o[s.k];
-  var ck = channelKey(card); var rule = ck ? S.cfg.rules[ck] : null;
-  return rule && rule[s.k] || "";
-}
 function postDate(card) {
   if (!S.postField) return null;
   var it = (card.customFieldItems || []).find(function (i) { return i.idCustomField === S.postField.id; });
@@ -203,37 +160,34 @@ function fieldOpt(card, f) {
   return it ? (f.options || []).find(function (o) { return o.id === it.idValue; }) : null;
 }
 function optText(o) { return o ? (o.value && o.value.text) || "" : ""; }
-function statusOf(card, s) {
-  if (s.k === "V") {
-    var e = optText(fieldOpt(card, S.editField));
-    if (/conclu/i.test(e)) return { text: "Concluído", color: "green", done: true };
-    if (/revisar/i.test(e)) return { text: "Revisar agora", color: "purple", done: false };
-    if (/corre/i.test(e)) return { text: "Em correção", color: "orange", done: false };
-    return { text: "Aguardando edição", color: null, done: false };
+
+/* status: o do campo personalizado da etapa; se não houver, o item marcado ou não no checklist */
+function statusOf(card, sec, item) {
+  if (sec.field) {
+    var o = fieldOpt(card, sec.field), tx = optText(o);
+    var done = /conclu|publicad/i.test(tx) || item.state === "complete";
+    return { text: tx || (item.state === "complete" ? "Feito" : "—"), color: o ? o.color : (done ? "green" : null), done: done, opt: o, field: sec.field };
   }
-  var o = fieldOpt(card, s.field);
-  var tx = optText(o);
-  return { text: tx || "—", color: o && o.color, done: /conclu|publicad/i.test(tx), opt: o };
+  return item.state === "complete" ? { text: "Feito", color: "green", done: true } : { text: "A fazer", color: null, done: false };
 }
 
 function buildTasks() {
-  var W0 = addDays(monday(new Date()), S.week * 7), W1 = addDays(W0, 7);
+  var W0 = addDays(monday(new Date()), S.week * 7), W1 = addDays(W0, 7), today = day(new Date());
   var out = [];
   S.cards.forEach(function (c) {
-    if (/^TEMPLATE/i.test(c.name)) return;
-    var pd = postDate(c); if (!pd) return;
-    STAGES.forEach(function (s) {
-      var p = who(c, s); if (!p && (!S.admin || !s.field || !fieldOpt(c, s.field))) return;
-      if (s.field === undefined) return;
-      if (s.f && !s.field) return;
-      var ci = checkItem(c, s);
-      var due = ci && ci.due ? new Date(ci.due) : addDays(new Date(pd.getFullYear(), pd.getMonth(), pd.getDate()), -(S.cfg.off[s.k] || 0));
-      if (ci && ci.due) due = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-      var st = statusOf(c, s);
-      var inWeek = due >= W0 && due < W1;
-      var overdue = due < W0 && !st.done && S.week === 0;
-      if (!inWeek && !overdue) return;
-      out.push({ card: c, s: s, person: p, due: due, ci: ci, synced: !!(ci && ci.due), st: st, old: overdue, late: !st.done && due < new Date(new Date().toDateString()) });
+    if (c.closed || /^TEMPLATE/i.test(c.name)) return;
+    (S.checks[c.id] || []).forEach(function (cl) {
+      if (IGNORE_CHECKLIST.test(cl.name)) return;
+      (cl.checkItems || []).forEach(function (it) {
+        if (!it.idMember || !it.due) return;
+        var sec = SECTIONS.find(function (s) { return s.re.test(it.name.trim()); });
+        var due = day(new Date(it.due));
+        var st = statusOf(c, sec, it);
+        var inWeek = due >= W0 && due < W1;
+        var old = due < W0 && !st.done && S.week === 0;
+        if (!inWeek && !old) return;
+        out.push({ card: c, item: it, sec: sec, who: it.idMember, due: due, st: st, old: old, late: !st.done && due < today, post: postDate(c) });
+      });
     });
   });
   out.sort(function (a, b) { return a.due - b.due; });
@@ -243,8 +197,11 @@ function buildTasks() {
 function savePref() { try { t.set("board", "private", "tarefas", { person: S.person }); } catch (e) {} }
 
 function render() {
-  if (S.view === "config") return renderConfig();
   var b = buildTasks(), tasks = b.tasks, W0 = b.W0;
+  var people = [];
+  tasks.forEach(function (x) { if (people.indexOf(x.who) < 0) people.push(x.who); });
+  people.sort(function (a, b) { return memberName(a).localeCompare(memberName(b)); });
+  if (S.admin && S.person && people.indexOf(S.person) < 0) people.push(S.person);
   var bar = h("div", { class: "bar" }, [
     h("span", { class: "week" }, [
       h("button", { "aria-label": "Semana anterior", text: "‹", onclick: function () { S.week--; render(); } }),
@@ -253,48 +210,43 @@ function render() {
     ]),
     !S.admin ? null : (function () {
       var ch = h("div", { class: "chips", role: "group", "aria-label": "Pessoa" });
-      [""].concat(PEOPLE).forEach(function (p) {
-        ch.append(h("button", { "aria-pressed": S.person === p ? "true" : "false", text: p || "Todos", onclick: function () { S.person = p; savePref(); render(); } }));
+      [""].concat(people).forEach(function (p) {
+        ch.append(h("button", { "aria-pressed": S.person === p ? "true" : "false", text: p ? memberName(p) : "Todos", onclick: function () { S.person = p; savePref(); render(); } }));
       });
       return ch;
     })(),
     h("span", { class: "sp" }),
-    S.admin ? h("button", { text: "Gravar nos cartões", title: "Grava pessoa e prazo de cada etapa desta semana no checklist do cartão", onclick: syncCards }) : null,
-    S.me === "Rodrigo" ? h("button", { text: "Equipe e prazos", onclick: function () { S.view = "config"; render(); } }) : null,
     h("button", { text: "Atualizar", onclick: load })
   ]);
-  var load_ = h("div", { class: "load" });
-  PEOPLE.forEach(function (p) {
-    var mine = tasks.filter(function (x) { return x.person === p && !x.st.done; });
-    if (!mine.length) return;
-    var late = mine.filter(function (x) { return x.late; }).length;
-    load_.append(h("span", { class: "pp", role: "button", tabindex: "0", onclick: function () { S.person = p; savePref(); render(); } }, [h("b", { text: p }), " · " + mine.length + " em aberto", late ? h("span", { class: "lt", text: " · " + late + " atrasada" + (late > 1 ? "s" : "") }) : null]));
-  });
+  var intro = S.admin ? "Tarefas tiradas do checklist de cada cartão: o item, a pessoa e a data colocadas nele." : "Estas são as suas tarefas, tiradas do checklist dos cartões. Mude o status quando avançar.";
+  var loadBar = "";
+  if (S.admin && !S.person) {
+    loadBar = h("div", { class: "load" });
+    people.forEach(function (p) {
+      var mine = tasks.filter(function (x) { return x.who === p && !x.st.done; });
+      if (!mine.length) return;
+      var late = mine.filter(function (x) { return x.late; }).length;
+      loadBar.append(h("span", { class: "pp", role: "button", tabindex: "0", onclick: function () { S.person = p; savePref(); render(); } }, [h("b", { text: memberName(p) }), " · " + mine.length + " em aberto", late ? h("span", { class: "lt", text: " · " + late + " atrasada" + (late > 1 ? "s" : "") }) : ""]));
+    });
+  }
   var grid = h("div", { class: "grid" });
-  if (S.person === "?") { app.replaceChildren(bar, h("p", { class: "note", text: "Sua conta do Trello ainda não está ligada à equipe. Fale com o Rodrigo." })); return; }
-  var list = S.person ? [S.person] : PEOPLE;
-  var free = S.person ? [] : tasks.filter(function (x) { return !x.person && !x.st.done; });
-  if (free.length) grid.append(personBlock("Sem responsável", free));
-  list.forEach(function (p) {
-    var mine = tasks.filter(function (x) { return x.person === p; });
-    if (!mine.length && !S.person) return;
-    grid.append(personBlock(p, mine));
+  (S.person ? [S.person] : people).forEach(function (p) {
+    grid.append(personBlock(p, tasks.filter(function (x) { return x.who === p; })));
   });
-  var intro = S.me && S.me !== "Rodrigo" && S.person === S.me ? "Estas são as suas tarefas da semana. Mude o status quando avançar." : "Tarefas pelo prazo de entrega de cada etapa. Itens atrasados de semanas anteriores aparecem em \"Pendentes\".";
-  app.replaceChildren(bar, h("p", { id: "msg", class: "note", text: intro, style: "margin-bottom:10px" }), S.person ? "" : load_, grid.children.length ? grid : h("p", { class: "note", text: "Nenhuma tarefa nesta semana." }));
+  app.replaceChildren(bar, h("p", { id: "msg", class: "note", text: intro, style: "margin-bottom:10px" }), loadBar, grid.children.length ? grid : h("p", { class: "note", text: "Nenhuma tarefa nesta semana." }));
 }
 
 function personBlock(p, mine) {
   var box = h("section", { class: "person" });
   var open = mine.filter(function (x) { return !x.st.done; }).length;
-  box.append(h("h2", {}, [p, h("span", { text: mine.length + " tarefa" + (mine.length === 1 ? "" : "s") + " · " + open + " em aberto" })]));
+  box.append(h("h2", {}, [memberName(p), h("span", { text: mine.length + " tarefa" + (mine.length === 1 ? "" : "s") + " · " + open + " em aberto" })]));
   if (!mine.length) { box.append(h("div", { class: "empty", text: "Nada para esta semana." })); return box; }
   var old = mine.filter(function (x) { return x.old; });
   if (old.length) box.append(section("Pendentes de semanas anteriores", old, true));
-  STAGES.forEach(function (s) {
-    var items = mine.filter(function (x) { return x.s.k === s.k && !x.old; });
+  SECTIONS.forEach(function (s) {
+    var items = mine.filter(function (x) { return x.sec === s && !x.old; });
     if (!items.length) return;
-    var sec = section(s.sec, items.filter(function (x) { return !(s.k === "E" && isSpanish(x.card)); }));
+    var sec = section(s.n, items.filter(function (x) { return !(s.k === "E" && isSpanish(x.card)); }), s.k === "O");
     if (s.k === "E") {
       var esp = items.filter(function (x) { return isSpanish(x.card); });
       if (esp.length) { sec.append(h("h4", { text: "Espanhol" })); esp.forEach(function (x) { sec.append(taskRow(x)); }); }
@@ -303,83 +255,27 @@ function personBlock(p, mine) {
   });
   return box;
 }
-function section(title, items, mixed) {
+function section(title, items, showItem) {
   var sec = h("div", { class: "sec" }, [h("h3", { text: title })]);
-  items.forEach(function (x) { sec.append(taskRow(x, mixed)); });
+  items.forEach(function (x) { sec.append(taskRow(x, showItem)); });
   return sec;
 }
-function taskRow(x, mixed) {
+function taskRow(x, showItem) {
   var lb = channelLabel(x.card), cc = col(lb && lb.color);
   var st = x.st, sc = col(st.color);
-  var pill = h("button", { class: "pill" + (x.s.field ? "" : " ro"), style: st.color ? "background:" + sc[0] + ";color:" + sc[1] : "background:#f1f2f4;color:#5e6c84", text: st.text });
-  if (x.s.field) pill.addEventListener("click", function () { openMenu(pill, x); });
-  var right = h("div", { class: "right" }, [pill]);
-  if (S.me === "Rodrigo") {
-    var sel = h("select", { class: "who", "aria-label": "Quem faz " + x.s.n });
-    PEOPLE.forEach(function (p) { var o = h("option", { value: p, text: p }); if (p === x.person) o.selected = true; sel.append(o); });
-    var none = h("option", { value: "", text: "Ninguém" }); if (!x.person) none.selected = true; sel.append(none);
-    sel.addEventListener("change", function () { setWho(x.card, x.s, sel.value); });
-    right.append(sel);
-  }
+  var pill = h("button", { class: "pill" + (st.field ? "" : " ro"), style: st.color ? "background:" + sc[0] + ";color:" + sc[1] : "background:#f1f2f4;color:#5e6c84", text: st.text });
+  if (st.field) pill.addEventListener("click", function () { openMenu(pill, x); });
   return h("div", { class: "task" }, [
     h("span", { class: "due" + (x.late ? " late" : "") }, [h("b", { text: DIAS[x.due.getDay()] + " " + dd(x.due) }), x.late ? " · atrasado" : ""]),
-    h("span", { class: "tname" }, [h("a", { href: x.card.url, text: x.card.name, title: x.card.name, onclick: function (e) { e.preventDefault(); t.showCard(x.card.id); } }), lb ? h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: lb.name }) : null, mixed ? h("span", { class: "note", style: "display:inline;font-size:11px", text: x.s.n }) : null]),
-    right
+    h("span", { class: "tname" }, [
+      h("a", { href: x.card.url, text: x.card.name, title: x.card.name, onclick: function (e) { e.preventDefault(); t.showCard(x.card.id); } }),
+      lb ? h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: lb.name }) : "",
+      showItem ? h("span", { class: "post", text: x.item.name + " · " }) : "",
+      x.post ? h("span", { class: "post", text: "posta " + DIAS[x.post.getDay()] + " " + dd(x.post) }) : ""
+    ]),
+    pill
   ]);
 }
-
-async function setWho(card, s, p) {
-  var id = rid(card), ck = channelKey(card), def = ck ? (S.cfg.rules[ck] || {})[s.k] || "" : "";
-  var o = Object.assign({}, S.resp[id] || {});
-  if (p === def) delete o[s.k]; else o[s.k] = p;
-  if (Object.keys(o).length) S.resp[id] = o; else delete S.resp[id];
-  /* limpa exceções de cartões que não existem mais no quadro */
-  var alive = {}; S.cards.forEach(function (c) { alive[rid(c)] = 1; });
-  Object.keys(S.resp).forEach(function (k) { if (!alive[k]) delete S.resp[k]; });
-  try { await t.set("board", "shared", "resp", S.resp); } catch (e) { msg("Não salvou: " + (e.message || e)); }
-  var ci = checkItem(card, s);
-  if (ci && ci.idMember && S.token) {
-    var m = memberOfPerson(p);
-    try {
-      await fetch("https://api.trello.com/1/cards/" + card.id + "/checkItem/" + ci.id + "?key=" + APP_KEY + "&token=" + S.token, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idMember: m ? m.id : "" }) });
-      ci.idMember = m ? m.id : null;
-    } catch (e) {}
-  }
-  render();
-}
-async function syncCards() {
-  if (!S.token) {
-    try { await t.getRestApi().authorize({ scope: "read,write", expiration: "never" }); S.token = await t.getRestApi().getToken(); }
-    catch (e) { msg("Para gravar, autorize a edição."); return; }
-  }
-  var tasks = buildTasks().tasks, done = 0, made = 0, skipped = 0, noMember = {};
-  function api(method, path, body) {
-    return fetch("https://api.trello.com/1" + path + (path.indexOf("?") < 0 ? "?" : "&") + "key=" + APP_KEY + "&token=" + S.token, { method: method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
-  }
-  msg("Gravando…");
-  for (var i = 0; i < tasks.length; i++) {
-    var x = tasks[i]; if (x.st.done) continue;
-    var ci = x.ci;
-    try {
-      if (!ci) {
-        var lists = S.checks[x.card.id] || [];
-        var cl = lists.find(function (l) { return /^checklist$|produ/i.test(l.name); }) || lists[0];
-        if (!cl) cl = await api("POST", "/checklists", { idCard: x.card.id, name: "Produção" });
-        ci = await api("POST", "/checklists/" + cl.id + "/checkItems", { name: x.s.n, pos: "bottom" });
-        made++;
-      }
-      var body = {};
-      if (!ci.due) { var d = new Date(x.due); d.setHours(20, 0, 0, 0); body.due = d.toISOString(); }
-      if (!ci.idMember && x.person) { var m = memberOfPerson(x.person); if (m) body.idMember = m.id; else noMember[x.person] = 1; }
-      if (Object.keys(body).length) { await api("PUT", "/cards/" + x.card.id + "/checkItem/" + ci.id, body); done++; } else skipped++;
-    } catch (e) { skipped++; }
-  }
-  await load();
-  var miss = Object.keys(noMember);
-  msgOk("Gravado em " + done + " etapa" + (done === 1 ? "" : "s") + (made ? " (" + made + " ite" + (made === 1 ? "m criado" : "ns criados") + " no checklist)" : "") + ". O que já estava no cartão não foi alterado." + (miss.length ? " Sem conta neste quadro, ficou só o prazo: " + miss.join(", ") + "." : ""));
-}
-function msgOk(tx) { var n = document.getElementById("msg"); if (n) { n.textContent = tx; n.className = "note"; n.style.color = "#216e4e"; } }
-function msg(tx) { var n = document.getElementById("msg"); if (n) { n.textContent = tx; n.className = "note err"; } }
 
 /* ---------- menu de status ---------- */
 var MENU = null;
@@ -388,12 +284,12 @@ document.addEventListener("mousedown", function (e) { if (MENU && !MENU.contains
 document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
 function openMenu(btn, x) {
   closeMenu();
-  var f = x.s.field, cur = x.st.opt ? x.st.opt.id : "";
+  var f = x.st.field, cur = x.st.opt ? x.st.opt.id : "";
   var menu = h("div", { class: "menu", role: "listbox" });
   [{ id: "", text: "—" }].concat((f.options || []).map(function (o) { return { id: o.id, text: optText(o), o: o }; })).forEach(function (op) {
     var c = col(op.o && op.o.color);
-    var b = h("button", { role: "option" }, [h("span", { class: "chip", style: op.o ? "background:" + c[0] + ";color:" + c[1] : "background:#f1f2f4;color:#8590a2", text: op.text }), op.id === cur ? h("span", { text: "✓", style: "color:#0c66e4" }) : null]);
-    b.addEventListener("click", function () { closeMenu(); if (op.id !== cur) setStatus(x.card, f, op.id); });
+    var b = h("button", { role: "option" }, [h("span", { class: "chip", style: op.o ? "background:" + c[0] + ";color:" + c[1] : "background:#f1f2f4;color:#8590a2", text: op.text }), op.id === cur ? h("span", { text: "✓", style: "color:#0c66e4" }) : ""]);
+    b.addEventListener("click", function () { closeMenu(); if (op.id !== cur) setStatus(x, f, op.id); });
     menu.append(b);
   });
   document.body.append(menu); MENU = menu; menu._owner = btn;
@@ -401,53 +297,25 @@ function openMenu(btn, x) {
   var top = r.bottom + 4; if (top + mh > innerHeight - 8) top = Math.max(8, r.top - mh - 4);
   menu.style.top = top + "px"; menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + "px";
 }
-async function setStatus(card, f, idValue) {
-  if (!S.token) {
-    try { await t.getRestApi().authorize({ scope: "read,write", expiration: "never" }); S.token = await t.getRestApi().getToken(); }
-    catch (e) { msg("Para mudar o status, autorize a edição."); return; }
-  }
+/* muda o campo de status e, quando conclui, marca o item do checklist como feito */
+async function setStatus(x, f, idValue) {
+  var card = x.card;
   try {
-    var res = await fetch("https://api.trello.com/1/cards/" + card.id + "/customField/" + f.id + "/item?key=" + APP_KEY + "&token=" + S.token, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(idValue ? { idValue: idValue } : { idValue: "", value: "" }) });
-    if (!res.ok) { if (res.status === 401) S.token = null; throw new Error(res.status); }
+    var base = "https://api.trello.com/1/cards/" + card.id;
+    var q = "?key=" + APP_KEY + "&token=" + S.token;
+    var res = await fetch(base + "/customField/" + f.id + "/item" + q, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(idValue ? { idValue: idValue } : { idValue: "", value: "" }) });
+    if (!res.ok) throw new Error(res.status);
     card.customFieldItems = (card.customFieldItems || []).filter(function (i) { return i.idCustomField !== f.id; });
     if (idValue) card.customFieldItems.push({ idCustomField: f.id, idValue: idValue });
+    var o = (f.options || []).find(function (op) { return op.id === idValue; });
+    var finished = /conclu|publicad/i.test(optText(o));
+    var want = finished ? "complete" : "incomplete";
+    if (x.item.state !== want) {
+      var r2 = await fetch(base + "/checkItem/" + x.item.id + q, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: want }) });
+      if (r2.ok) x.item.state = want;
+    }
     render();
-  } catch (e) { msg("Não salvou (" + e.message + ")."); }
-}
-
-/* ---------- ajustes: equipe e prazos ---------- */
-function renderConfig() {
-  var cfg = JSON.parse(JSON.stringify(S.cfg));
-  var labels = (S.board.labels || []).filter(function (l) { return l.name && /robot|goat|turn|soy|celebs|dunker|mystery|bean|mariner/i.test(l.name); });
-  labels.forEach(function (l) { var k = norm(l.name); if (!cfg.rules[k]) cfg.rules[k] = {}; });
-  var tb = h("tbody");
-  Object.keys(cfg.rules).forEach(function (k) {
-    var lb = (S.board.labels || []).find(function (l) { return norm(l.name) === k; });
-    var cc = col(lb && lb.color);
-    var tr = h("tr", {}, [h("td", {}, [h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: lb ? lb.name : k })])]);
-    STAGES.forEach(function (s) {
-      var sel = h("select", { "aria-label": s.n + " em " + (lb ? lb.name : k) });
-      sel.append(h("option", { value: "", text: "—" }));
-      PEOPLE.forEach(function (p) { var o = h("option", { value: p, text: p }); if (cfg.rules[k][s.k] === p) o.selected = true; sel.append(o); });
-      sel.addEventListener("change", function () { if (sel.value) cfg.rules[k][s.k] = sel.value; else delete cfg.rules[k][s.k]; });
-      tr.append(h("td", {}, [sel]));
-    });
-    tb.append(tr);
-  });
-  var offs = h("div", { class: "offs" });
-  STAGES.forEach(function (s) {
-    var inp = h("input", { type: "number", min: "0", max: "30", value: String(cfg.off[s.k] || 0) });
-    inp.addEventListener("input", function () { cfg.off[s.k] = Math.max(0, parseInt(inp.value || "0", 10)); });
-    offs.append(h("label", {}, [s.n, inp]));
-  });
-  app.replaceChildren(
-    h("div", { class: "bar" }, [h("button", { text: "‹ Voltar às tarefas", onclick: function () { S.view = "tarefas"; render(); } }), h("span", { class: "sp" }),
-      h("button", { class: "primary", text: "Salvar", onclick: async function () { try { await t.set("board", "shared", "cfg", cfg); S.cfg = cfg; S.view = "tarefas"; render(); } catch (e) { msg("Não salvou: " + (e.message || e)); } } })]),
-    h("p", { id: "msg", class: "note", text: "Quem faz cada etapa por padrão em cada canal. Em cada vídeo dá para trocar a pessoa direto na lista de tarefas." }),
-    h("table", { class: "cfg" }, [h("thead", {}, [h("tr", {}, [h("th", { text: "Canal" })].concat(STAGES.map(function (s) { return h("th", { text: s.n }); })))]), tb]),
-    h("h3", { text: "Prazo de entrega: dias antes da postagem", style: "font-size:14px;margin:18px 0 0" }),
-    offs
-  );
+  } catch (e) { var n = document.getElementById("msg"); if (n) { n.textContent = "Não salvou (" + e.message + ")."; n.className = "note err"; } }
 }
 
 load();

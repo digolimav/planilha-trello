@@ -49,8 +49,14 @@ input.dt:hover,input.dt:focus{border-color:var(--line);background:#fff}
 .lab{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:500;margin:1px 4px 1px 0;white-space:nowrap}
 .late{color:#ae2e24;font-weight:600}
 select.st{appearance:none;-webkit-appearance:none;width:100%;min-width:120px;font:inherit;font-size:13px;padding:5px 24px 5px 10px;border-radius:999px;border:0;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 13px) 55%,calc(100% - 9px) 55%;background-size:4px 4px;background-repeat:no-repeat}
-select.st:disabled{cursor:default;opacity:.85}
-select.saving{opacity:.5}
+.pill{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;min-width:120px;font:inherit;font-size:13px;padding:5px 10px;border-radius:999px;border:0;cursor:pointer;text-align:left}
+.pill::after{content:"\25BE";font-size:10px;opacity:.7}
+.pill.saving{opacity:.5}
+.menu{position:fixed;z-index:50;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(9,30,66,.2);padding:6px;min-width:180px}
+.menu button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:0;background:transparent;padding:4px 6px;border-radius:6px;text-align:left}
+.menu button:hover,.menu button:focus{background:var(--soft);outline:none}
+.menu .chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:13px}
+.menu .ok{color:var(--accent);font-size:13px}
 </style>
 </head>
 <body>
@@ -216,13 +222,41 @@ function startTable() {
     } catch (e) { alertBox("Não salvou a data (" + e.message + ")."); input.disabled = false; }
   }
 
+  var MENU = null;
+  function closeMenu() { if (MENU) { MENU.remove(); MENU = null; } }
+  document.addEventListener("mousedown", function (e) { if (MENU && !MENU.contains(e.target) && e.target !== MENU._owner) closeMenu(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
+  window.addEventListener("resize", closeMenu);
+  function pillStyle(o) { var c = col(o && o.color); return o ? "background-color:" + c[0] + ";color:" + c[1] : "background-color:#f1f2f4;color:#8590a2"; }
+  function openMenu(btn, card, f, cur) {
+    closeMenu();
+    var menu = h("div", { class: "menu", role: "listbox", "aria-label": f.name });
+    var opts = [{ id: "", text: "\u2014" }].concat((f.options || []).map(function (op) { return { id: op.id, text: optText(op), o: op }; }));
+    var items = opts.map(function (op) {
+      var b = h("button", { role: "option", "aria-selected": op.id === cur ? "true" : "false" }, [h("span", { class: "chip", style: pillStyle(op.o), text: op.text }), op.id === cur ? h("span", { class: "ok", text: "\u2713" }) : null]);
+      b.addEventListener("click", function () { closeMenu(); btn.focus(); if (op.id !== cur) setValue(card, f, op.id, btn); });
+      b.addEventListener("keydown", function (e) {
+        var k = items.indexOf(b);
+        if (e.key === "ArrowDown") { e.preventDefault(); items[Math.min(k + 1, items.length - 1)].focus(); }
+        if (e.key === "ArrowUp") { e.preventDefault(); items[Math.max(k - 1, 0)].focus(); }
+        if (e.key === "Tab") closeMenu();
+      });
+      menu.append(b); return b;
+    });
+    document.body.append(menu); MENU = menu; menu._owner = btn;
+    var r = btn.getBoundingClientRect(), mh = menu.offsetHeight, mw = Math.max(menu.offsetWidth, r.width);
+    menu.style.minWidth = r.width + "px";
+    var top = r.bottom + 4; if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
+    var left = Math.min(r.left, window.innerWidth - mw - 8);
+    menu.style.top = top + "px"; menu.style.left = Math.max(8, left) + "px";
+    (items[opts.findIndex(function (x) { return x.id === cur; })] || items[0]).focus();
+  }
   function statusSelect(card, f) {
-    var cur = valueOf(card, f), o = optOf(f, cur), c = col(o && o.color);
-    var sel = h("select", { class: "st", style: o ? "background-color:" + c[0] + ";color:" + c[1] : "background-color:#f1f2f4;color:#8590a2", "aria-label": f.name + " de " + card.name });
-    sel.append(h("option", { value: "", text: "—" }));
-    (f.options || []).forEach(function (op) { var e = h("option", { value: op.id, text: optText(op) }); if (op.id === cur) e.selected = true; sel.append(e); });
-    sel.addEventListener("change", function () { setValue(card, f, sel.value, sel); });
-    return sel;
+    var cur = valueOf(card, f), o = optOf(f, cur);
+    var btn = h("button", { class: "pill", style: pillStyle(o), "aria-haspopup": "listbox", "aria-label": f.name + " de " + card.name + ": " + (o ? optText(o) : "vazio"), text: o ? optText(o) : "\u2014" });
+    btn.addEventListener("click", function () { if (MENU && MENU._owner === btn) { closeMenu(); return; } openMenu(btn, card, f, cur); });
+    btn.addEventListener("keydown", function (e) { if (e.key === "ArrowDown") { e.preventDefault(); openMenu(btn, card, f, cur); } });
+    return btn;
   }
 
   function visibleCards() {
@@ -321,7 +355,8 @@ function startTable() {
       tb.append(tr);
     });
     if (!cards.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum vídeo nesse período." })]));
-    document.getElementById("tbl").replaceChildren(h("table", {}, [h("thead", {}, [trh]), tb]));
+    closeMenu();
+    var tbl = document.getElementById("tbl"); tbl.onscroll = closeMenu; tbl.replaceChildren(h("table", {}, [h("thead", {}, [trh]), tb]));
   }
 
   load();

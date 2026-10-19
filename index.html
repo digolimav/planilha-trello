@@ -38,6 +38,12 @@ td.name a:hover{text-decoration:underline}
 input.dt{font:inherit;font-size:13px;padding:3px 6px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);width:128px}
 input.dt:hover,input.dt:focus{border-color:var(--line);background:#fff}
 .wd{color:var(--muted);font-size:12px;margin-left:2px}
+th.fit,td.fit{width:1%;white-space:nowrap;padding-right:24px}
+.datebtn{position:relative;display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid transparent;border-radius:6px;font-size:13px;color:var(--ink);cursor:pointer;font-variant-numeric:tabular-nums}
+.datebtn:hover,.datebtn:focus-within{border-color:var(--line);background:#fff}
+.datebtn .wd{display:inline-block;width:28px;margin:0;font-weight:600;color:var(--muted)}
+.datebtn input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0}
+.datebtn input::-webkit-calendar-picker-indicator{position:absolute;inset:0;width:auto;height:auto;cursor:pointer}
 .sub{display:block;color:var(--muted);font-size:12px}
 .dd{position:relative;display:inline-block}
 .dd>button{min-width:170px;text-align:left}
@@ -331,7 +337,7 @@ function startTable() {
       counts.append(h("span", {}, [f.name + ": ", h("b", { text: String(pend) }), " em aberto"]));
     });
     var heads = ["Vídeo", "Projeto", "Postagem"].concat(S.fields.map(function (f) { return f.name; }));
-    var trh = h("tr"); heads.forEach(function (x) { trh.append(h("th", { class: "nosort", text: x })); });
+    var trh = h("tr"); heads.forEach(function (x, i) { trh.append(h("th", { class: "nosort" + (i === 1 || i === 2 ? " fit" : ""), text: x })); });
     var tb = h("tbody"), lastWeek = null;
     cards.forEach(function (c) {
       var pd = postDate(c), wk = pd ? +monday(pd) : -1;
@@ -341,14 +347,15 @@ function startTable() {
         lastWeek = wk;
       }
       var postCell;
+      var wdTxt = pd ? DIAS[pd.getDay()].charAt(0).toUpperCase() + DIAS[pd.getDay()].slice(1) : "";
       if (S.postField) {
-        var inp = h("input", { type: "date", class: "dt", value: pd ? iso(pd) : "", "aria-label": "Data de postagem de " + c.name });
+        var inp = h("input", { type: "date", value: pd ? iso(pd) : "", "aria-label": "Data de postagem de " + c.name });
         inp.addEventListener("change", function () { setPost(c, inp.value, inp); });
-        postCell = h("td", {}, [inp, pd ? h("span", { class: "wd", text: DIAS[pd.getDay()] }) : null]);
-      } else postCell = h("td", { text: pd ? dd(pd) + " " + DIAS[pd.getDay()] : "" });
+        postCell = h("td", { class: "fit" }, [h("span", { class: "datebtn" }, pd ? [h("span", { class: "wd", text: wdTxt }), h("span", { text: dd(pd) }), inp] : [h("span", { class: "wd", text: "" }), h("span", { class: "note", text: "Definir data" }), inp])]);
+      } else postCell = h("td", { class: "fit" }, [h("span", { class: "datebtn" }, [h("span", { class: "wd", text: wdTxt }), h("span", { text: pd ? dd(pd) : "" })])]);
       var tr = h("tr", {}, [
         h("td", { class: "name" }, [h("a", { href: c.url, text: c.name, onclick: function (e) { e.preventDefault(); t.showCard(c.id); } }), h("span", { class: "sub", text: listName(c.idList) })]),
-        h("td", {}, (c.labels || []).map(function (l) { var cc = col(l.color); return h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name || " " }); })),
+        h("td", { class: "fit" }, (c.labels || []).map(function (l) { var cc = col(l.color); return h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name || " " }); })),
         postCell
       ]);
       S.fields.forEach(function (f) { tr.append(h("td", {}, [statusSelect(c, f)])); });

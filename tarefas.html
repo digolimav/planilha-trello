@@ -220,6 +220,7 @@ function buildTasks() {
   var W0 = addDays(monday(new Date()), S.week * 7), W1 = addDays(W0, 7);
   var out = [];
   S.cards.forEach(function (c) {
+    if (/^TEMPLATE/i.test(c.name)) return;
     var pd = postDate(c); if (!pd) return;
     STAGES.forEach(function (s) {
       var p = who(c, s); if (!p && (!S.admin || !s.field || !fieldOpt(c, s.field))) return;
@@ -280,7 +281,7 @@ function render() {
     grid.append(personBlock(p, mine));
   });
   var intro = S.me && S.me !== "Rodrigo" && S.person === S.me ? "Estas são as suas tarefas da semana. Mude o status quando avançar." : "Tarefas pelo prazo de entrega de cada etapa. Itens atrasados de semanas anteriores aparecem em \"Pendentes\".";
-  app.replaceChildren(bar, h("p", { id: "msg", class: "note", text: intro, style: "margin-bottom:10px" }), S.person ? null : load_, grid.children.length ? grid : h("p", { class: "note", text: "Nenhuma tarefa nesta semana." }));
+  app.replaceChildren(bar, h("p", { id: "msg", class: "note", text: intro, style: "margin-bottom:10px" }), S.person ? "" : load_, grid.children.length ? grid : h("p", { class: "note", text: "Nenhuma tarefa nesta semana." }));
 }
 
 function personBlock(p, mine) {
@@ -375,8 +376,9 @@ async function syncCards() {
   }
   await load();
   var miss = Object.keys(noMember);
-  msg("Gravado em " + done + " etapa" + (done === 1 ? "" : "s") + (made ? " (" + made + " ite" + (made === 1 ? "m criado" : "ns criados") + " no checklist)" : "") + ". O que já estava no cartão não foi alterado." + (miss.length ? " Sem conta neste quadro, ficou só o prazo: " + miss.join(", ") + "." : ""));
+  msgOk("Gravado em " + done + " etapa" + (done === 1 ? "" : "s") + (made ? " (" + made + " ite" + (made === 1 ? "m criado" : "ns criados") + " no checklist)" : "") + ". O que já estava no cartão não foi alterado." + (miss.length ? " Sem conta neste quadro, ficou só o prazo: " + miss.join(", ") + "." : ""));
 }
+function msgOk(tx) { var n = document.getElementById("msg"); if (n) { n.textContent = tx; n.className = "note"; n.style.color = "#216e4e"; } }
 function msg(tx) { var n = document.getElementById("msg"); if (n) { n.textContent = tx; n.className = "note err"; } }
 
 /* ---------- menu de status ---------- */

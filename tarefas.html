@@ -125,7 +125,7 @@ var S = { cfg: null, resp: {}, me: null, view: "tarefas", person: null, week: 0,
 async function load() {
   try {
     var r = await Promise.all([
-      t.board("id", "labels", "customFields"),
+      t.board("id", "labels", "customFields", "members"),
       t.lists("id", "name"),
       t.cards("id", "name", "labels", "idList", "url", "customFieldItems"),
       t.member("id", "fullName"),
@@ -145,6 +145,13 @@ async function load() {
     S.admin = ADMINS.indexOf(S.me) >= 0;
     S.person = S.admin ? (pref.person !== undefined ? pref.person : "") : (S.me || "?");
     try { if (await t.getRestApi().isAuthorized()) S.token = await t.getRestApi().getToken(); } catch (e) {}
+    S.checks = {};
+    if (S.token) {
+      try {
+        var cr = await fetch("https://api.trello.com/1/boards/" + S.board.id + "/cards?fields=id&checklists=all&checklist_fields=name,pos&key=" + APP_KEY + "&token=" + S.token);
+        if (cr.ok) (await cr.json()).forEach(function (c) { S.checks[c.id] = c.checklists || []; });
+      } catch (e) {}
+    }
     render();
   } catch (e) {
     app.replaceChildren(h("p", { class: "err", text: "Não foi possível ler o quadro: " + (e && e.message || e) }));
@@ -162,7 +169,24 @@ function channelLabel(card) {
 }
 function isSpanish(card) { return (card.labels || []).some(function (l) { return /no soy|esp/i.test(l.name); }) || /^ESP\b/i.test(card.name); }
 function rid(card) { return card.id.slice(-8); }
+/* item do checklist de produção que corresponde a cada etapa */
+function checkItem(card, s) {
+  var lists = (S.checks[card.id] || []).slice().sort(function (a, b) { return a.pos - b.pos; });
+  var items = [];
+  lists.forEach(function (l) { (l.checkItems || []).slice().sort(function (a, b) { return a.pos - b.pos; }).forEach(function (i) { items.push(i); }); });
+  var re = { R: /^roteiro/i, T: /^tradu/i, H: /^thumb/i, E: /^edi[cç]/i, P: /^postagem/i }[s.k];
+  if (re) return items.find(function (i) { return re.test(i.name.trim()); }) || null;
+  if (s.k === "V") { var ie = items.findIndex(function (i) { return /^edi[cç]/i.test(i.name.trim()); }); return ie < 0 ? null : items.slice(ie + 1).find(function (i) { return /^revis/i.test(i.name.trim()); }) || null; }
+  return null;
+}
+function personOfMember(id) {
+  var m = (S.board.members || []).find(function (x) { return x.id === id; });
+  return m ? PEOPLE.find(function (p) { return MATCH[p].test(m.fullName || ""); }) || "" : "";
+}
+function memberOfPerson(p) { return (S.board.members || []).find(function (m) { return MATCH[p] && MATCH[p].test(m.fullName || ""); }); }
 function who(card, s) {
+  var ci = checkItem(card, s);
+  if (ci && ci.idMember) { var pm = personOfMember(ci.idMember); if (pm) return pm; }
   var o = S.resp[rid(card)];
   if (o && o[s.k] !== undefined) return o[s.k];
   var ck = channelKey(card); var rule = ck ? S.cfg.rules[ck] : null;
@@ -201,12 +225,14 @@ function buildTasks() {
       var p = who(c, s); if (!p && (!S.admin || !s.field || !fieldOpt(c, s.field))) return;
       if (s.field === undefined) return;
       if (s.f && !s.field) return;
-      var due = addDays(new Date(pd.getFullYear(), pd.getMonth(), pd.getDate()), -(S.cfg.off[s.k] || 0));
+      var ci = checkItem(c, s);
+      var due = ci && ci.due ? new Date(ci.due) : addDays(new Date(pd.getFullYear(), pd.getMonth(), pd.getDate()), -(S.cfg.off[s.k] || 0));
+      if (ci && ci.due) due = new Date(due.getFullYear(), due.getMonth(), due.getDate());
       var st = statusOf(c, s);
       var inWeek = due >= W0 && due < W1;
       var overdue = due < W0 && !st.done && S.week === 0;
       if (!inWeek && !overdue) return;
-      out.push({ card: c, s: s, person: p, due: due, st: st, old: overdue, late: !st.done && due < new Date(new Date().toDateString()) });
+      out.push({ card: c, s: s, person: p, due: due, ci: ci, synced: !!(ci && ci.due), st: st, old: overdue, late: !st.done && due < new Date(new Date().toDateString()) });
     });
   });
   out.sort(function (a, b) { return a.due - b.due; });
@@ -232,6 +258,7 @@ function render() {
       return ch;
     })(),
     h("span", { class: "sp" }),
+    S.admin ? h("button", { text: "Gravar nos cartões", title: "Grava pessoa e prazo de cada etapa desta semana no checklist do cartão", onclick: syncCards }) : null,
     S.me === "Rodrigo" ? h("button", { text: "Equipe e prazos", onclick: function () { S.view = "config"; render(); } }) : null,
     h("button", { text: "Atualizar", onclick: load })
   ]);
@@ -309,7 +336,46 @@ async function setWho(card, s, p) {
   var alive = {}; S.cards.forEach(function (c) { alive[rid(c)] = 1; });
   Object.keys(S.resp).forEach(function (k) { if (!alive[k]) delete S.resp[k]; });
   try { await t.set("board", "shared", "resp", S.resp); } catch (e) { msg("Não salvou: " + (e.message || e)); }
+  var ci = checkItem(card, s);
+  if (ci && ci.idMember && S.token) {
+    var m = memberOfPerson(p);
+    try {
+      await fetch("https://api.trello.com/1/cards/" + card.id + "/checkItem/" + ci.id + "?key=" + APP_KEY + "&token=" + S.token, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idMember: m ? m.id : "" }) });
+      ci.idMember = m ? m.id : null;
+    } catch (e) {}
+  }
   render();
+}
+async function syncCards() {
+  if (!S.token) {
+    try { await t.getRestApi().authorize({ scope: "read,write", expiration: "never" }); S.token = await t.getRestApi().getToken(); }
+    catch (e) { msg("Para gravar, autorize a edição."); return; }
+  }
+  var tasks = buildTasks().tasks, done = 0, made = 0, skipped = 0, noMember = {};
+  function api(method, path, body) {
+    return fetch("https://api.trello.com/1" + path + (path.indexOf("?") < 0 ? "?" : "&") + "key=" + APP_KEY + "&token=" + S.token, { method: method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+  }
+  msg("Gravando…");
+  for (var i = 0; i < tasks.length; i++) {
+    var x = tasks[i]; if (x.st.done) continue;
+    var ci = x.ci;
+    try {
+      if (!ci) {
+        var lists = S.checks[x.card.id] || [];
+        var cl = lists.find(function (l) { return /^checklist$|produ/i.test(l.name); }) || lists[0];
+        if (!cl) cl = await api("POST", "/checklists", { idCard: x.card.id, name: "Produção" });
+        ci = await api("POST", "/checklists/" + cl.id + "/checkItems", { name: x.s.n, pos: "bottom" });
+        made++;
+      }
+      var body = {};
+      if (!ci.due) { var d = new Date(x.due); d.setHours(20, 0, 0, 0); body.due = d.toISOString(); }
+      if (!ci.idMember && x.person) { var m = memberOfPerson(x.person); if (m) body.idMember = m.id; else noMember[x.person] = 1; }
+      if (Object.keys(body).length) { await api("PUT", "/cards/" + x.card.id + "/checkItem/" + ci.id, body); done++; } else skipped++;
+    } catch (e) { skipped++; }
+  }
+  await load();
+  var miss = Object.keys(noMember);
+  msg("Gravado em " + done + " etapa" + (done === 1 ? "" : "s") + (made ? " (" + made + " ite" + (made === 1 ? "m criado" : "ns criados") + " no checklist)" : "") + ". O que já estava no cartão não foi alterado." + (miss.length ? " Sem conta neste quadro, ficou só o prazo: " + miss.join(", ") + "." : ""));
 }
 function msg(tx) { var n = document.getElementById("msg"); if (n) { n.textContent = tx; n.className = "note err"; } }
 

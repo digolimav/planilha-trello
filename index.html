@@ -84,6 +84,12 @@ if (VIEW !== "table") {
     "board-buttons": function () {
       return [{
         icon: { dark: ICON, light: ICON },
+        text: "Tarefas",
+        callback: function (t) {
+          return t.modal({ url: base.replace(/index\.html$/, "").replace(/\/?$/, "/") + "tarefas.html?v=" + Date.now(), fullscreen: true, title: "Tarefas da semana" });
+        }
+      }, {
+        icon: { dark: ICON, light: ICON },
         text: "Planilha",
         callback: function (t) {
           return t.modal({ url: base + "?view=table&v=" + Date.now(), fullscreen: true, title: "Planilha" });

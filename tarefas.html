@@ -198,7 +198,7 @@ function buildTasks() {
   S.cards.forEach(function (c) {
     var pd = postDate(c); if (!pd) return;
     STAGES.forEach(function (s) {
-      var p = who(c, s); if (!p) return;
+      var p = who(c, s); if (!p && (!S.admin || !s.field || !fieldOpt(c, s.field))) return;
       if (s.field === undefined) return;
       if (s.f && !s.field) return;
       var due = addDays(new Date(pd.getFullYear(), pd.getMonth(), pd.getDate()), -(S.cfg.off[s.k] || 0));
@@ -245,6 +245,8 @@ function render() {
   var grid = h("div", { class: "grid" });
   if (S.person === "?") { app.replaceChildren(bar, h("p", { class: "note", text: "Sua conta do Trello ainda não está ligada à equipe. Fale com o Rodrigo." })); return; }
   var list = S.person ? [S.person] : PEOPLE;
+  var free = S.person ? [] : tasks.filter(function (x) { return !x.person && !x.st.done; });
+  if (free.length) grid.append(personBlock("Sem responsável", free));
   list.forEach(function (p) {
     var mine = tasks.filter(function (x) { return x.person === p; });
     if (!mine.length && !S.person) return;
@@ -287,7 +289,7 @@ function taskRow(x, mixed) {
   if (S.me === "Rodrigo") {
     var sel = h("select", { class: "who", "aria-label": "Quem faz " + x.s.n });
     PEOPLE.forEach(function (p) { var o = h("option", { value: p, text: p }); if (p === x.person) o.selected = true; sel.append(o); });
-    sel.append(h("option", { value: "", text: "Ninguém" }));
+    var none = h("option", { value: "", text: "Ninguém" }); if (!x.person) none.selected = true; sel.append(none);
     sel.addEventListener("change", function () { setWho(x.card, x.s, sel.value); });
     right.append(sel);
   }

@@ -71,6 +71,8 @@ var t = TrelloPowerUp.iframe({ appKey: APP_KEY, appName: APP_NAME });
 var app = document.getElementById("app");
 
 var PEOPLE = ["Rodrigo", "Lucas", "Lázaro", "Vinny", "Latexi", "Helen", "Matheus", "Robert"];
+/* quem pode ver as tarefas de todo mundo; o resto vê só as próprias */
+var ADMINS = ["Rodrigo"];
 /* como reconhecer cada pessoa pelo nome da conta no Trello */
 var MATCH = { Rodrigo: /rodrigo/i, Lucas: /^lucas/i, "Lázaro": /l[aá]zaro/i, Vinny: /vinn?y/i, Latexi: /l[aá]texi/i, Helen: /helen/i, Matheus: /matt|matheus nunes/i, Robert: /robert/i };
 var STAGES = [
@@ -82,7 +84,7 @@ var STAGES = [
   { k: "P", n: "Postagem", sec: "Postagens", f: /publica/i }
 ];
 var DEFAULT_CFG = {
-  off: { R: 3, T: 2, H: 1, E: 1, V: 0, P: 0 },
+  off: { R: 4, T: 3, H: 1, E: 1, V: 0, P: 0 },
   rules: {
     celebsgoat: { R: "Helen", H: "Robert", E: "Lázaro", P: "Lázaro" },
     dunkergoat: { R: "Helen", H: "Robert", E: "Lucas", P: "Lucas" },
@@ -140,7 +142,8 @@ async function load() {
     S.editField = STAGES.find(function (s) { return s.k === "E"; }).field;
     S.me = PEOPLE.find(function (p) { return MATCH[p].test(S.member.fullName || ""); }) || null;
     var pref = r[6] || {};
-    S.person = pref.person !== undefined ? pref.person : (S.me && S.me !== "Rodrigo" ? S.me : "");
+    S.admin = ADMINS.indexOf(S.me) >= 0;
+    S.person = S.admin ? (pref.person !== undefined ? pref.person : "") : (S.me || "?");
     try { if (await t.getRestApi().isAuthorized()) S.token = await t.getRestApi().getToken(); } catch (e) {}
     render();
   } catch (e) {
@@ -221,7 +224,7 @@ function render() {
       h("span", { text: (S.week === 0 ? "Esta semana" : S.week === 1 ? "Próxima semana" : S.week === -1 ? "Semana passada" : "Semana") + " · " + dd(W0) + " a " + dd(addDays(W0, 6)) }),
       h("button", { "aria-label": "Próxima semana", text: "›", onclick: function () { S.week++; render(); } })
     ]),
-    (function () {
+    !S.admin ? null : (function () {
       var ch = h("div", { class: "chips", role: "group", "aria-label": "Pessoa" });
       [""].concat(PEOPLE).forEach(function (p) {
         ch.append(h("button", { "aria-pressed": S.person === p ? "true" : "false", text: p || "Todos", onclick: function () { S.person = p; savePref(); render(); } }));
@@ -240,6 +243,7 @@ function render() {
     load_.append(h("span", { class: "pp", role: "button", tabindex: "0", onclick: function () { S.person = p; savePref(); render(); } }, [h("b", { text: p }), " · " + mine.length + " em aberto", late ? h("span", { class: "lt", text: " · " + late + " atrasada" + (late > 1 ? "s" : "") }) : null]));
   });
   var grid = h("div", { class: "grid" });
+  if (S.person === "?") { app.replaceChildren(bar, h("p", { class: "note", text: "Sua conta do Trello ainda não está ligada à equipe. Fale com o Rodrigo." })); return; }
   var list = S.person ? [S.person] : PEOPLE;
   list.forEach(function (p) {
     var mine = tasks.filter(function (x) { return x.person === p; });

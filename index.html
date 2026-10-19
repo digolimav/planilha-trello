@@ -67,7 +67,7 @@ if (VIEW !== "table") {
         icon: { dark: ICON, light: ICON },
         text: "Planilha",
         callback: function (t) {
-          return t.modal({ url: base + "?view=table", fullscreen: true, title: "Planilha" });
+          return t.modal({ url: base + "?view=table&v=" + Date.now(), fullscreen: true, title: "Planilha" });
         }
       }];
     }

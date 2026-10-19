@@ -39,6 +39,13 @@ input.dt{font:inherit;font-size:13px;padding:3px 6px;border:1px solid transparen
 input.dt:hover,input.dt:focus{border-color:var(--line);background:#fff}
 .wd{color:var(--muted);font-size:12px;margin-left:2px}
 .sub{display:block;color:var(--muted);font-size:12px}
+.dd{position:relative;display:inline-block}
+.dd>button{min-width:170px;text-align:left}
+.ddp{position:absolute;z-index:5;top:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(9,30,66,.18);padding:8px;min-width:240px;max-height:360px;overflow:auto}
+.ddp label{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:13px}
+.ddp label:hover{background:var(--soft)}
+.ddp .row{display:flex;gap:6px;margin-bottom:6px}
+.ddp .row button{padding:3px 8px;font-size:12px}
 .lab{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:500;margin:1px 4px 1px 0;white-space:nowrap}
 .late{color:#ae2e24;font-weight:600}
 select.st{appearance:none;-webkit-appearance:none;width:100%;min-width:120px;font:inherit;font-size:13px;padding:5px 24px 5px 10px;border-radius:999px;border:0;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 13px) 55%,calc(100% - 9px) 55%;background-size:4px 4px;background-repeat:no-repeat}
@@ -79,7 +86,6 @@ if (VIEW !== "table") {
 /* ---------- tabela ---------- */
 function startTable() {
   var t = TrelloPowerUp.iframe(APP_KEY ? { appKey: APP_KEY, appName: APP_NAME } : {});
-  var ENTREGA_DIAS = 2; /* entrega da equipe = postagem menos estes dias, quando o cartão ainda não tem data de entrega */
   var COLORS = {
     green: ["#baf3db", "#164b35"], yellow: ["#f8e6a0", "#533f04"], orange: ["#fedec8", "#702e00"],
     red: ["#ffd5d2", "#5d1f1a"], purple: ["#dfd8fd", "#352c63"], blue: ["#cce0ff", "#09326c"],
@@ -90,8 +96,10 @@ function startTable() {
   var DIAS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
   function col(c) { if (!c) return COLORS.none; var b = c.replace(/_(light|dark)$/, ""); return COLORS[b] || COLORS.none; }
   var period = "duas";
-  try { period = localStorage.getItem("planilha-periodo") || "duas"; } catch (e) {}
-  var S = { board: null, lists: [], cards: [], fields: [], postField: null, q: "", label: "", list: "", token: null };
+  var S = { board: null, lists: [], cards: [], fields: [], postField: null, q: "", labels: [], list: "", token: null, open: false };
+  /* preferências de cada pessoa ficam salvas no próprio Trello (privadas por membro e por quadro) */
+  async function loadPrefs() { try { var p = await t.get("board", "private", "planilha"); if (p) { period = p.period || period; S.labels = p.labels || []; } } catch (e) {} }
+  function savePrefs() { try { t.set("board", "private", "planilha", { period: period, labels: S.labels }); } catch (e) {} }
   var app = document.getElementById("app");
   function h(tag, attrs, kids) {
     var el = document.createElement(tag);
@@ -114,6 +122,8 @@ function startTable() {
         t.cards("id", "name", "due", "dueComplete", "labels", "idList", "url", "pos", "customFieldItems")
       ]);
       S.board = r[0]; S.lists = r[1]; S.cards = r[2];
+      if (!S.prefsLoaded) { await loadPrefs(); S.prefsLoaded = true; }
+      S.labels = S.labels.filter(function (id) { return (S.board.labels || []).some(function (l) { return l.id === id; }); });
       var cfs = (S.board.customFields || []).slice().sort(function (a, b) { return (a.pos || 0) - (b.pos || 0); });
       S.fields = cfs.filter(function (f) { return f.type === "list"; });
       S.postField = cfs.find(function (f) { return f.type === "date" && /postag/i.test(f.name); }) || null;
@@ -201,11 +211,6 @@ function startTable() {
         var items = (card.customFieldItems || []).filter(function (i) { return i.idCustomField !== f.id; });
         items.push({ idCustomField: f.id, value: { date: d.toISOString() } });
         card.customFieldItems = items;
-        if (!card.due) {
-          var due = addDays(d, -ENTREGA_DIAS);
-          await api("PUT", "/cards/" + card.id, { due: due.toISOString() });
-          card.due = due.toISOString();
-        }
       }
       renderTable();
     } catch (e) { alertBox("Não salvou a data (" + e.message + ")."); input.disabled = false; }
@@ -224,7 +229,7 @@ function startTable() {
     var q = S.q.trim().toLowerCase();
     var out = S.cards.filter(function (c) {
       if (q && c.name.toLowerCase().indexOf(q) < 0) return false;
-      if (S.label && !(c.labels || []).some(function (l) { return l.id === S.label; })) return false;
+      if (S.labels.length && !(c.labels || []).some(function (l) { return S.labels.indexOf(l.id) >= 0; })) return false;
       if (S.list && c.idList !== S.list) return false;
       return inPeriod(postDate(c));
     });
@@ -238,16 +243,41 @@ function startTable() {
     return out;
   }
 
+  function channelPicker(labels) {
+    var names = labels.filter(function (l) { return S.labels.indexOf(l.id) >= 0; }).map(function (l) { return l.name; });
+    var txt = !names.length ? "Canais: todos" : names.length === 1 ? "Canal: " + names[0] : "Canais: " + names.length + " selecionados";
+    var wrap = h("div", { class: "dd" });
+    var btn = h("button", { "aria-expanded": S.open ? "true" : "false", text: txt + " ▾", onclick: function () { S.open = !S.open; render(); } });
+    wrap.append(btn);
+    if (S.open) {
+      var panel = h("div", { class: "ddp" }, [h("div", { class: "row" }, [
+        h("button", { text: "Todos", onclick: function () { S.labels = []; savePrefs(); render(); } }),
+        h("button", { text: "Fechar", onclick: function () { S.open = false; render(); } })
+      ])]);
+      labels.forEach(function (l) {
+        var cb = h("input", { type: "checkbox" }); cb.checked = S.labels.indexOf(l.id) >= 0;
+        cb.addEventListener("change", function () {
+          if (cb.checked) S.labels.push(l.id); else S.labels = S.labels.filter(function (x) { return x !== l.id; });
+          savePrefs(); render();
+        });
+        var cc = col(l.color);
+        panel.append(h("label", {}, [cb, h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name })]));
+      });
+      wrap.append(panel);
+    }
+    return wrap;
+  }
+
   function render() {
     var labels = (S.board.labels || []).filter(function (l) { return l.name; });
     var chips = h("div", { class: "chips", role: "group", "aria-label": "Período" });
     PERIODS.forEach(function (p) {
-      chips.append(h("button", { "aria-pressed": p[0] === period ? "true" : "false", text: p[1], onclick: function () { period = p[0]; try { localStorage.setItem("planilha-periodo", period); } catch (e) {} render(); } }));
+      chips.append(h("button", { "aria-pressed": p[0] === period ? "true" : "false", text: p[1], onclick: function () { period = p[0]; savePrefs(); render(); } }));
     });
     var bar = h("div", { class: "bar" }, [
       chips,
       h("input", { type: "search", placeholder: "Buscar vídeo", value: S.q, oninput: function (e) { S.q = e.target.value; renderTable(); } }),
-      (function () { var s = h("select", { "aria-label": "Projeto", onchange: function (e) { S.label = e.target.value; renderTable(); } }); s.append(h("option", { value: "", text: "Todos os projetos" })); labels.forEach(function (l) { var o = h("option", { value: l.id, text: l.name }); if (l.id === S.label) o.selected = true; s.append(o); }); return s; })(),
+      channelPicker(labels),
       (function () { var s = h("select", { "aria-label": "Lista", onchange: function (e) { S.list = e.target.value; renderTable(); } }); s.append(h("option", { value: "", text: "Todas as listas" })); S.lists.forEach(function (l) { var o = h("option", { value: l.id, text: l.name }); if (l.id === S.list) o.selected = true; s.append(o); }); return s; })(),
       h("span", { class: "sp" }),
       S.token || !APP_KEY ? null : h("button", { class: "primary", text: "Autorizar edição", onclick: authorize }),
@@ -266,7 +296,7 @@ function startTable() {
       var pend = cards.filter(function (c) { var t2 = optText(optOf(f, valueOf(c, f))).toLowerCase(); return t2.indexOf("conclu") < 0; }).length;
       counts.append(h("span", {}, [f.name + ": ", h("b", { text: String(pend) }), " em aberto"]));
     });
-    var heads = ["Vídeo", "Projeto", "Postagem", "Entrega"].concat(S.fields.map(function (f) { return f.name; }));
+    var heads = ["Vídeo", "Projeto", "Postagem"].concat(S.fields.map(function (f) { return f.name; }));
     var trh = h("tr"); heads.forEach(function (x) { trh.append(h("th", { class: "nosort", text: x })); });
     var tb = h("tbody"), lastWeek = null;
     cards.forEach(function (c) {
@@ -276,7 +306,6 @@ function startTable() {
         tb.append(h("tr", { class: "grp" }, [h("td", { colspan: heads.length, text: (pd ? weekLabel(monday(pd)) : "Sem data de postagem") + " · " + n })]));
         lastWeek = wk;
       }
-      var late = c.due && !c.dueComplete && new Date(c.due).getTime() < now;
       var postCell;
       if (S.postField) {
         var inp = h("input", { type: "date", class: "dt", value: pd ? iso(pd) : "", "aria-label": "Data de postagem de " + c.name });
@@ -286,8 +315,7 @@ function startTable() {
       var tr = h("tr", {}, [
         h("td", { class: "name" }, [h("a", { href: c.url, text: c.name, onclick: function (e) { e.preventDefault(); t.showCard(c.id); } }), h("span", { class: "sub", text: listName(c.idList) })]),
         h("td", {}, (c.labels || []).map(function (l) { var cc = col(l.color); return h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name || " " }); })),
-        postCell,
-        h("td", { class: late ? "late" : null, text: c.due ? dd(new Date(c.due)) + (late ? " · atrasado" : "") : "" })
+        postCell
       ]);
       S.fields.forEach(function (f) { tr.append(h("td", {}, [statusSelect(c, f)])); });
       tb.append(tr);

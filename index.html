@@ -31,6 +31,14 @@ td.name{min-width:260px;max-width:380px}
 td.name a{color:var(--ink);text-decoration:none;font-weight:500}
 td.name a:hover{text-decoration:underline}
 .grp td{background:var(--soft);font-weight:600;color:var(--muted);text-transform:uppercase;font-size:12px;letter-spacing:.04em}
+.chips{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.chips button{border:0;border-radius:0;border-right:1px solid var(--line);padding:6px 10px}
+.chips button:last-child{border-right:0}
+.chips button[aria-pressed="true"]{background:var(--ink);color:#fff}
+input.dt{font:inherit;font-size:13px;padding:3px 6px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);width:128px}
+input.dt:hover,input.dt:focus{border-color:var(--line);background:#fff}
+.wd{color:var(--muted);font-size:12px;margin-left:2px}
+.sub{display:block;color:var(--muted);font-size:12px}
 .lab{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:500;margin:1px 4px 1px 0;white-space:nowrap}
 .late{color:#ae2e24;font-weight:600}
 select.st{appearance:none;-webkit-appearance:none;width:100%;min-width:120px;font:inherit;font-size:13px;padding:5px 24px 5px 10px;border-radius:999px;border:0;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 13px) 55%,calc(100% - 9px) 55%;background-size:4px 4px;background-repeat:no-repeat}
@@ -71,14 +79,19 @@ if (VIEW !== "table") {
 /* ---------- tabela ---------- */
 function startTable() {
   var t = TrelloPowerUp.iframe(APP_KEY ? { appKey: APP_KEY, appName: APP_NAME } : {});
+  var ENTREGA_DIAS = 2; /* entrega da equipe = postagem menos estes dias, quando o cartão ainda não tem data de entrega */
   var COLORS = {
     green: ["#baf3db", "#164b35"], yellow: ["#f8e6a0", "#533f04"], orange: ["#fedec8", "#702e00"],
     red: ["#ffd5d2", "#5d1f1a"], purple: ["#dfd8fd", "#352c63"], blue: ["#cce0ff", "#09326c"],
     sky: ["#c6edfb", "#164555"], lime: ["#d3f1a7", "#37471f"], pink: ["#fdd0ec", "#50253f"],
     black: ["#44546f", "#ffffff"], none: ["#f1f2f4", "#44546f"]
   };
+  var PERIODS = [["duas", "Esta semana + próxima"], ["esta", "Esta semana"], ["proxima", "Próxima semana"], ["proximos", "Próximos"], ["anteriores", "Anteriores"], ["todos", "Todos"]];
+  var DIAS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
   function col(c) { if (!c) return COLORS.none; var b = c.replace(/_(light|dark)$/, ""); return COLORS[b] || COLORS.none; }
-  var S = { board: null, lists: [], cards: [], fields: [], q: "", label: "", list: "", sort: "due", dir: 1, group: true, token: null };
+  var period = "duas";
+  try { period = localStorage.getItem("planilha-periodo") || "duas"; } catch (e) {}
+  var S = { board: null, lists: [], cards: [], fields: [], postField: null, q: "", label: "", list: "", token: null };
   var app = document.getElementById("app");
   function h(tag, attrs, kids) {
     var el = document.createElement(tag);
@@ -101,8 +114,9 @@ function startTable() {
         t.cards("id", "name", "due", "dueComplete", "labels", "idList", "url", "pos", "customFieldItems")
       ]);
       S.board = r[0]; S.lists = r[1]; S.cards = r[2];
-      S.fields = (S.board.customFields || []).filter(function (f) { return f.type === "list"; })
-        .sort(function (a, b) { return (a.pos || 0) - (b.pos || 0); });
+      var cfs = (S.board.customFields || []).slice().sort(function (a, b) { return (a.pos || 0) - (b.pos || 0); });
+      S.fields = cfs.filter(function (f) { return f.type === "list"; });
+      S.postField = cfs.find(function (f) { return f.type === "date" && /postag/i.test(f.name); }) || null;
       try { if (APP_KEY && await t.getRestApi().isAuthorized()) S.token = await t.getRestApi().getToken(); } catch (e) {}
       render();
     } catch (e) {
@@ -110,14 +124,37 @@ function startTable() {
     }
   }
 
-  function valueOf(card, f) {
-    var it = (card.customFieldItems || []).find(function (i) { return i.idCustomField === f.id; });
-    return it ? it.idValue : "";
-  }
+  function item(card, f) { return (card.customFieldItems || []).find(function (i) { return i.idCustomField === f.id; }); }
+  function valueOf(card, f) { var it = item(card, f); return it ? it.idValue : ""; }
   function optOf(f, id) { return (f.options || []).find(function (o) { return o.id === id; }); }
   function optText(o) { return o ? (o.value && o.value.text) || "" : ""; }
   function listName(id) { var l = S.lists.find(function (x) { return x.id === id; }); return l ? l.name : ""; }
-  function fmtDate(d) { if (!d) return ""; var x = new Date(d); return String(x.getDate()).padStart(2, "0") + "/" + String(x.getMonth() + 1).padStart(2, "0"); }
+  function postDate(card) {
+    if (S.postField) { var it = item(card, S.postField); if (it && it.value && it.value.date) return new Date(it.value.date); return null; }
+    return card.due ? new Date(card.due) : null;
+  }
+  function dd(x) { return String(x.getDate()).padStart(2, "0") + "/" + String(x.getMonth() + 1).padStart(2, "0"); }
+  function iso(x) { return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0"); }
+  function monday(x) { var d = new Date(x.getFullYear(), x.getMonth(), x.getDate()); var w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return d; }
+  function addDays(x, n) { var d = new Date(x); d.setDate(d.getDate() + n); return d; }
+  var W0 = monday(new Date()), W1 = addDays(W0, 7), W2 = addDays(W0, 14);
+  function inPeriod(d) {
+    if (period === "todos") return true;
+    if (!d) return period === "proximos";
+    if (period === "duas") return d >= W0 && d < W2;
+    if (period === "esta") return d >= W0 && d < W1;
+    if (period === "proxima") return d >= W1 && d < W2;
+    if (period === "proximos") return d >= new Date(new Date().toDateString());
+    if (period === "anteriores") return d < W0;
+    return true;
+  }
+  function weekLabel(m) {
+    var e = addDays(m, 6), base = dd(m) + " a " + dd(e);
+    if (+m === +W0) return "Esta semana · " + base;
+    if (+m === +W1) return "Próxima semana · " + base;
+    if (+m === +addDays(W0, -7)) return "Semana passada · " + base;
+    return "Semana de " + base;
+  }
 
   async function authorize() {
     if (!APP_KEY) { alertBox("Falta configurar a chave da API do Power-Up."); return false; }
@@ -129,24 +166,49 @@ function startTable() {
     } catch (e) { alertBox("Autorização cancelada."); return false; }
   }
   function alertBox(msg) { var n = document.getElementById("msg"); if (n) { n.textContent = msg; n.className = "note err"; } }
+  async function api(method, path, body) {
+    var res = await fetch("https://api.trello.com/1" + path + (path.indexOf("?") < 0 ? "?" : "&") + "key=" + APP_KEY + "&token=" + S.token, { method: method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    if (!res.ok) { if (res.status === 401) S.token = null; throw new Error(res.status); }
+    return res;
+  }
 
   async function setValue(card, f, idValue, sel) {
     if (!S.token && !(await authorize())) { render(); return; }
     sel.classList.add("saving"); sel.disabled = true;
-    var url = "https://api.trello.com/1/cards/" + card.id + "/customField/" + f.id + "/item?key=" + APP_KEY + "&token=" + S.token;
-    var body = idValue ? { idValue: idValue } : { idValue: "", value: "" };
     try {
-      var res = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (!res.ok) throw new Error(res.status);
+      await api("PUT", "/cards/" + card.id + "/customField/" + f.id + "/item", idValue ? { idValue: idValue } : { idValue: "", value: "" });
       var items = (card.customFieldItems || []).filter(function (i) { return i.idCustomField !== f.id; });
       if (idValue) items.push({ idCustomField: f.id, idValue: idValue });
       card.customFieldItems = items;
-      render();
+      renderTable();
     } catch (e) {
-      if (String(e.message) === "401") { S.token = null; }
       alertBox("Não salvou (" + e.message + "). Tente de novo.");
       sel.classList.remove("saving"); sel.disabled = false;
     }
+  }
+
+  async function setPost(card, value, input) {
+    if (!S.token && !(await authorize())) { renderTable(); return; }
+    input.disabled = true;
+    try {
+      var f = S.postField;
+      if (!value) {
+        await api("PUT", "/cards/" + card.id + "/customField/" + f.id + "/item", { value: "" });
+        card.customFieldItems = (card.customFieldItems || []).filter(function (i) { return i.idCustomField !== f.id; });
+      } else {
+        var p = value.split("-"), d = new Date(+p[0], +p[1] - 1, +p[2], 12, 0, 0);
+        await api("PUT", "/cards/" + card.id + "/customField/" + f.id + "/item", { value: { date: d.toISOString() } });
+        var items = (card.customFieldItems || []).filter(function (i) { return i.idCustomField !== f.id; });
+        items.push({ idCustomField: f.id, value: { date: d.toISOString() } });
+        card.customFieldItems = items;
+        if (!card.due) {
+          var due = addDays(d, -ENTREGA_DIAS);
+          await api("PUT", "/cards/" + card.id, { due: due.toISOString() });
+          card.due = due.toISOString();
+        }
+      }
+      renderTable();
+    } catch (e) { alertBox("Não salvou a data (" + e.message + ")."); input.disabled = false; }
   }
 
   function statusSelect(card, f) {
@@ -164,68 +226,73 @@ function startTable() {
       if (q && c.name.toLowerCase().indexOf(q) < 0) return false;
       if (S.label && !(c.labels || []).some(function (l) { return l.id === S.label; })) return false;
       if (S.list && c.idList !== S.list) return false;
-      return true;
+      return inPeriod(postDate(c));
     });
-    var key = S.sort;
+    var dir = period === "anteriores" ? -1 : 1;
     out.sort(function (a, b) {
-      var va, vb;
-      if (key === "due") { va = a.due || "9999"; vb = b.due || "9999"; }
-      else if (key === "name") { va = a.name.toLowerCase(); vb = b.name.toLowerCase(); }
-      else if (key === "label") { va = ((a.labels || [])[0] || {}).name || "~"; vb = ((b.labels || [])[0] || {}).name || "~"; }
-      else { var f = S.fields.find(function (x) { return x.id === key; }); va = optText(optOf(f, valueOf(a, f))) || "~"; vb = optText(optOf(f, valueOf(b, f))) || "~"; }
-      return va < vb ? -S.dir : va > vb ? S.dir : 0;
+      var da = postDate(a), db = postDate(b);
+      if (!da && !db) return a.name < b.name ? -1 : 1;
+      if (!da) return 1; if (!db) return -1;
+      return (da - db) * dir;
     });
     return out;
   }
 
   function render() {
-    var cards = visibleCards();
     var labels = (S.board.labels || []).filter(function (l) { return l.name; });
+    var chips = h("div", { class: "chips", role: "group", "aria-label": "Período" });
+    PERIODS.forEach(function (p) {
+      chips.append(h("button", { "aria-pressed": p[0] === period ? "true" : "false", text: p[1], onclick: function () { period = p[0]; try { localStorage.setItem("planilha-periodo", period); } catch (e) {} render(); } }));
+    });
     var bar = h("div", { class: "bar" }, [
+      chips,
       h("input", { type: "search", placeholder: "Buscar vídeo", value: S.q, oninput: function (e) { S.q = e.target.value; renderTable(); } }),
       (function () { var s = h("select", { "aria-label": "Projeto", onchange: function (e) { S.label = e.target.value; renderTable(); } }); s.append(h("option", { value: "", text: "Todos os projetos" })); labels.forEach(function (l) { var o = h("option", { value: l.id, text: l.name }); if (l.id === S.label) o.selected = true; s.append(o); }); return s; })(),
       (function () { var s = h("select", { "aria-label": "Lista", onchange: function (e) { S.list = e.target.value; renderTable(); } }); s.append(h("option", { value: "", text: "Todas as listas" })); S.lists.forEach(function (l) { var o = h("option", { value: l.id, text: l.name }); if (l.id === S.list) o.selected = true; s.append(o); }); return s; })(),
-      h("label", { class: "note" }, [(function () { var c = h("input", { type: "checkbox", onchange: function (e) { S.group = e.target.checked; renderTable(); } }); c.checked = S.group; return c; })(), " Agrupar por lista"]),
       h("span", { class: "sp" }),
       S.token || !APP_KEY ? null : h("button", { class: "primary", text: "Autorizar edição", onclick: authorize }),
       h("button", { text: "Atualizar", onclick: load })
     ]);
-    app.replaceChildren(bar, h("p", { id: "msg", class: "note", text: S.fields.length ? "" : "Este quadro ainda não tem campos personalizados do tipo lista." }), h("div", { id: "counts", class: "counts" }), h("div", { id: "tbl", class: "wrap" }));
-    renderTable(cards);
+    var warn = !S.postField ? "Sem o campo de data \"Data de postagem\" no quadro: usando a data de entrega como postagem." : (S.fields.length ? "" : "Este quadro ainda não tem campos personalizados do tipo lista.");
+    app.replaceChildren(bar, h("p", { id: "msg", class: "note", text: warn }), h("div", { id: "counts", class: "counts" }), h("div", { id: "tbl", class: "wrap" }));
+    renderTable();
   }
 
-  function renderTable(cards) {
-    cards = cards || visibleCards();
+  function renderTable() {
+    var cards = visibleCards();
     var now = Date.now();
-    /* contagem por etapa: quantos não estão concluídos */
     var counts = document.getElementById("counts"); counts.replaceChildren(h("span", {}, [h("b", { text: String(cards.length) }), " vídeos"]));
     S.fields.forEach(function (f) {
-      var pend = cards.filter(function (c) { var t2 = optText(optOf(f, valueOf(c, f))).toLowerCase(); return t2 && t2.indexOf("conclu") < 0; }).length;
+      var pend = cards.filter(function (c) { var t2 = optText(optOf(f, valueOf(c, f))).toLowerCase(); return t2.indexOf("conclu") < 0; }).length;
       counts.append(h("span", {}, [f.name + ": ", h("b", { text: String(pend) }), " em aberto"]));
     });
-    var heads = [["name", "Vídeo"], ["label", "Projeto"], ["due", "Data"]].concat(S.fields.map(function (f) { return [f.id, f.name]; }));
-    var trh = h("tr");
-    heads.forEach(function (hd) {
-      var arrow = S.sort === hd[0] ? (S.dir > 0 ? " ▲" : " ▼") : "";
-      trh.append(h("th", { text: hd[1] + arrow, onclick: function () { if (S.sort === hd[0]) S.dir = -S.dir; else { S.sort = hd[0]; S.dir = 1; } renderTable(); } }));
+    var heads = ["Vídeo", "Projeto", "Postagem", "Entrega"].concat(S.fields.map(function (f) { return f.name; }));
+    var trh = h("tr"); heads.forEach(function (x) { trh.append(h("th", { class: "nosort", text: x })); });
+    var tb = h("tbody"), lastWeek = null;
+    cards.forEach(function (c) {
+      var pd = postDate(c), wk = pd ? +monday(pd) : -1;
+      if (wk !== lastWeek) {
+        var n = cards.filter(function (x) { var d = postDate(x); return (d ? +monday(d) : -1) === wk; }).length;
+        tb.append(h("tr", { class: "grp" }, [h("td", { colspan: heads.length, text: (pd ? weekLabel(monday(pd)) : "Sem data de postagem") + " · " + n })]));
+        lastWeek = wk;
+      }
+      var late = c.due && !c.dueComplete && new Date(c.due).getTime() < now;
+      var postCell;
+      if (S.postField) {
+        var inp = h("input", { type: "date", class: "dt", value: pd ? iso(pd) : "", "aria-label": "Data de postagem de " + c.name });
+        inp.addEventListener("change", function () { setPost(c, inp.value, inp); });
+        postCell = h("td", {}, [inp, pd ? h("span", { class: "wd", text: DIAS[pd.getDay()] }) : null]);
+      } else postCell = h("td", { text: pd ? dd(pd) + " " + DIAS[pd.getDay()] : "" });
+      var tr = h("tr", {}, [
+        h("td", { class: "name" }, [h("a", { href: c.url, text: c.name, onclick: function (e) { e.preventDefault(); t.showCard(c.id); } }), h("span", { class: "sub", text: listName(c.idList) })]),
+        h("td", {}, (c.labels || []).map(function (l) { var cc = col(l.color); return h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name || " " }); })),
+        postCell,
+        h("td", { class: late ? "late" : null, text: c.due ? dd(new Date(c.due)) + (late ? " · atrasado" : "") : "" })
+      ]);
+      S.fields.forEach(function (f) { tr.append(h("td", {}, [statusSelect(c, f)])); });
+      tb.append(tr);
     });
-    var tb = h("tbody");
-    var groups = S.group ? S.lists.map(function (l) { return { name: l.name, cards: cards.filter(function (c) { return c.idList === l.id; }) }; }) : [{ name: null, cards: cards }];
-    groups.forEach(function (g) {
-      if (!g.cards.length) return;
-      if (g.name != null) tb.append(h("tr", { class: "grp" }, [h("td", { colspan: heads.length, text: g.name + " · " + g.cards.length })]));
-      g.cards.forEach(function (c) {
-        var late = c.due && !c.dueComplete && new Date(c.due).getTime() < now;
-        var tr = h("tr", {}, [
-          h("td", { class: "name" }, [h("a", { href: c.url, text: c.name, onclick: function (e) { e.preventDefault(); t.showCard(c.id); } })]),
-          h("td", {}, (c.labels || []).map(function (l) { var cc = col(l.color); return h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name || " " }); })),
-          h("td", { class: late ? "late" : null, text: fmtDate(c.due) + (late ? " · atrasado" : "") })
-        ]);
-        S.fields.forEach(function (f) { tr.append(h("td", {}, [statusSelect(c, f)])); });
-        tb.append(tr);
-      });
-    });
-    if (!tb.children.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum vídeo com esses filtros." })]));
+    if (!cards.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum vídeo nesse período." })]));
     document.getElementById("tbl").replaceChildren(h("table", {}, [h("thead", {}, [trh]), tb]));
   }
 

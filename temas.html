@@ -113,6 +113,20 @@ function potOf(c) {
 }
 function stars(c) { var o = potOf(c); return o ? (o.value.text.match(/⭐/g) || []).length : 0; }
 function listIdx(id) { return S.listsAll.findIndex(function (l) { return l.id === id; }); }
+/* "Por quê": a seção "Por quê / Potencial" da descrição; descrição fora do modelo aparece inteira */
+function whyOf(c) {
+  var d = c.desc || "";
+  var m = d.match(/Por qu[eê][^\n]*\n([\s\S]*?)(\n#|$)/i);
+  var txt = m ? m[1] : (/^\s*#/.test(d) ? "" : d);
+  return txt.replace(/https?:\/\/\S+/g, "").replace(/[*#\u200c]/g, "").replace(/\s+/g, " ").trim();
+}
+/* links de referência: anexos ou links escritos na descrição (o que for maior) */
+function linkCount(c) {
+  var att = (c.badges && c.badges.attachments) || 0;
+  var inDesc = ((c.desc || "").match(/https?:\/\/\S+/g) || []).filter(function (u) { return !/drive\.google|docs\.google/.test(u); });
+  var uniq = inDesc.filter(function (u, i) { return inDesc.indexOf(u) === i; }).length;
+  return Math.max(att, uniq);
+}
 function project(c) { var l = (c.labels || []).find(function (x) { return x.name; }); return l || null; }
 
 function multiPicker(key, items, getSel, setSel, allTxt, manyTxt, chip) {
@@ -175,14 +189,14 @@ function renderTable() {
     var cc = col(g.lab && g.lab.color);
     tb.append(h("tr", { class: "grp" }, [h("td", { colspan: heads.length }, [g.lab ? h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1] + ";text-transform:none;letter-spacing:0", text: g.lab.name }) : "Sem projeto", "  · " + g.cards.length])]));
     g.cards.forEach(function (c) {
-      var n = (c.badges && c.badges.attachments) || 0;
+      var n = linkCount(c);
       var li = listIdx(c.idList), list = S.listsAll[li];
       var stage = h("button", { class: "pill", style: "background:" + (STAGE[li] || "#f1f2f4"), text: list ? list.name : "" });
       stage.addEventListener("click", function () { openMenu(stage, S.listsAll.map(function (l, i) { return { id: l.id, text: l.name, bg: STAGE[i] || "#f1f2f4" }; }), c.idList, function (id) { setList(c, id); }); });
       var o = potOf(c);
       var pot = h("button", { class: "pill", style: o ? "background:#fff7d6" : "background:#f1f2f4;color:#8590a2", text: o ? o.value.text : "—" });
       if (S.pot) pot.addEventListener("click", function () { openMenu(pot, [{ id: "", text: "—" }].concat(S.pot.options.map(function (op) { return { id: op.id, text: op.value.text, bg: "#fff7d6" }; })), o ? o.id : "", function (id) { setPot(c, id); }); });
-      var why = (c.desc || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+      var why = whyOf(c);
       tb.append(h("tr", {}, [
         h("td", { class: "name" }, [h("a", { href: c.url, text: c.name, onclick: function (e) { e.preventDefault(); t.showCard(c.id); } })]),
         h("td", { class: "fit" }, [stage]),

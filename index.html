@@ -213,10 +213,31 @@ function startTable() {
       if (idValue) items.push({ idCustomField: f.id, idValue: idValue });
       card.customFieldItems = items;
       renderTable();
+      syncChecklist(card, f, idValue);
     } catch (e) {
       alertBox("Não salvou (" + e.message + "). Tente de novo.");
       sel.classList.remove("saving"); sel.disabled = false;
     }
+  }
+
+  /* status concluído aqui = item marcado no checklist do cartão (e vice-versa no Tarefas) */
+  var FIELD_ITEM = [
+    { f: /roteir/i, i: /roteir/i, not: /revis|tradu/i },
+    { f: /tradu/i, i: /tradu/i },
+    { f: /thumb/i, i: /thumb/i, not: /brainstorm/i },
+    { f: /edi[cç]/i, i: /edi[cç]|montagem/i, not: /revis/i },
+    { f: /publica/i, i: /postagem|publica/i }
+  ];
+  async function syncChecklist(card, f, idValue) {
+    try {
+      var m = FIELD_ITEM.find(function (x) { return x.f.test(f.name); }); if (!m) return;
+      var want = /conclu|publicad/i.test(optText(optOf(f, idValue))) ? "complete" : "incomplete";
+      var cls = await (await api("GET", "/cards/" + card.id + "/checklists?checkItem_fields=name,state")).json();
+      var found = [];
+      cls.forEach(function (cl) { if (/aprova/i.test(cl.name)) return; (cl.checkItems || []).forEach(function (it) { if (m.i.test(it.name) && !(m.not && m.not.test(it.name))) found.push(it); }); });
+      if (found.length !== 1 || found[0].state === want) return;
+      await api("PUT", "/cards/" + card.id + "/checkItem/" + found[0].id, { state: want });
+    } catch (e) {}
   }
 
   /* caixa de seleção = o "concluído" do próprio cartão no Trello */

@@ -45,6 +45,13 @@ th.fit,td.fit{width:1%;white-space:nowrap;padding-right:24px}
 .datebtn input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0}
 .datebtn input::-webkit-calendar-picker-indicator{position:absolute;inset:0;width:auto;height:auto;cursor:pointer}
 .sub{display:block;color:var(--muted);font-size:12px}
+td.name .nm{display:flex;align-items:flex-start;gap:10px}
+td.name input.ok{width:16px;height:16px;margin:2px 0 0;flex:none;cursor:pointer;accent-color:#1f845a}
+tr.done td{background:#fafbfc}
+tr.done td>*{opacity:.45}
+tr.done td.name a{text-decoration:line-through}
+tr.nodate td{cursor:pointer;background:#fff7e6;color:#7f5f01}
+.toggle{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);cursor:pointer;white-space:nowrap}
 .dd{position:relative;display:inline-block}
 .dd>button{min-width:170px;text-align:left}
 .ddp{position:absolute;z-index:5;top:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(9,30,66,.18);padding:8px;min-width:240px;max-height:360px;overflow:auto}
@@ -110,14 +117,14 @@ function startTable() {
     sky: ["#6cc3e0", "#0e3240"], lime: ["#94c748", "#25330f"], pink: ["#e774bb", "#40122f"],
     black: ["#44546f", "#ffffff"], none: ["#f1f2f4", "#44546f"]
   };
-  var PERIODS = [["duas", "Esta semana + próxima"], ["esta", "Esta semana"], ["proxima", "Próxima semana"], ["proximos", "Próximos"], ["anteriores", "Anteriores"], ["todos", "Todos"]];
+  var PERIODS = [["esta", "Esta semana"], ["proximos", "Esta semana e próximas"], ["todos", "Todos"]];
   var DIAS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
   function col(c) { if (!c) return COLORS.none; var b = c.replace(/_(light|dark)$/, ""); return COLORS[b] || COLORS.none; }
-  var period = "duas";
-  var S = { board: null, lists: [], cards: [], fields: [], postField: null, q: "", labels: [], list: "", token: null, open: false };
+  var period = "proximos";
+  var S = { board: null, lists: [], cards: [], fields: [], postField: null, q: "", labels: [], listSel: [], hideDone: false, showNoDate: false, token: null, open: "" };
   /* preferências de cada pessoa ficam salvas no próprio Trello (privadas por membro e por quadro) */
-  async function loadPrefs() { try { var p = await t.get("board", "private", "planilha"); if (p) { period = p.period || period; S.labels = p.labels || []; } } catch (e) {} }
-  function savePrefs() { try { t.set("board", "private", "planilha", { period: period, labels: S.labels }); } catch (e) {} }
+  async function loadPrefs() { try { var p = await t.get("board", "private", "planilha"); if (p) { period = PERIODS.some(function (x) { return x[0] === p.period; }) ? p.period : period; S.labels = p.labels || []; S.listSel = p.lists || []; S.hideDone = !!p.hideDone; } } catch (e) {} }
+  function savePrefs() { try { t.set("board", "private", "planilha", { period: period, labels: S.labels, lists: S.listSel, hideDone: S.hideDone }); } catch (e) {} }
   var app = document.getElementById("app");
   function h(tag, attrs, kids) {
     var el = document.createElement(tag);
@@ -142,6 +149,7 @@ function startTable() {
       S.board = r[0]; S.lists = r[1]; S.cards = r[2];
       if (!S.prefsLoaded) { await loadPrefs(); S.prefsLoaded = true; }
       S.labels = S.labels.filter(function (id) { return (S.board.labels || []).some(function (l) { return l.id === id; }); });
+      S.listSel = S.listSel.filter(function (id) { return S.lists.some(function (l) { return l.id === id; }); });
       var cfs = (S.board.customFields || []).slice().sort(function (a, b) { return (a.pos || 0) - (b.pos || 0); });
       S.fields = cfs.filter(function (f) { return f.type === "list"; });
       S.postField = cfs.find(function (f) { return f.type === "date" && /postag/i.test(f.name); }) || null;
@@ -167,13 +175,9 @@ function startTable() {
   function addDays(x, n) { var d = new Date(x); d.setDate(d.getDate() + n); return d; }
   var W0 = monday(new Date()), W1 = addDays(W0, 7), W2 = addDays(W0, 14);
   function inPeriod(d) {
-    if (period === "todos") return true;
-    if (!d) return period === "proximos";
-    if (period === "duas") return d >= W0 && d < W2;
+    if (!d) return false;
     if (period === "esta") return d >= W0 && d < W1;
-    if (period === "proxima") return d >= W1 && d < W2;
-    if (period === "proximos") return d >= new Date(new Date().toDateString());
-    if (period === "anteriores") return d < W0;
+    if (period === "proximos") return d >= W0;
     return true;
   }
   function weekLabel(m) {
@@ -213,6 +217,14 @@ function startTable() {
       alertBox("Não salvou (" + e.message + "). Tente de novo.");
       sel.classList.remove("saving"); sel.disabled = false;
     }
+  }
+
+  /* caixa de seleção = o "concluído" do próprio cartão no Trello */
+  async function setDone(card, val, cb) {
+    if (!S.token && !(await authorize())) { renderTable(); return; }
+    cb.disabled = true;
+    try { await api("PUT", "/cards/" + card.id, { dueComplete: val }); card.dueComplete = val; renderTable(); }
+    catch (e) { alertBox("Não salvou (" + e.message + ")."); cb.checked = !val; cb.disabled = false; }
   }
 
   async function setPost(card, value, input) {
@@ -271,43 +283,46 @@ function startTable() {
     return btn;
   }
 
-  function visibleCards() {
+  function baseFilter(c) {
     var q = S.q.trim().toLowerCase();
-    var out = S.cards.filter(function (c) {
-      if (q && c.name.toLowerCase().indexOf(q) < 0) return false;
-      if (S.labels.length && !(c.labels || []).some(function (l) { return S.labels.indexOf(l.id) >= 0; })) return false;
-      if (S.list && c.idList !== S.list) return false;
-      return inPeriod(postDate(c));
-    });
-    var dir = period === "anteriores" ? -1 : 1;
-    out.sort(function (a, b) {
-      var da = postDate(a), db = postDate(b);
-      if (!da && !db) return a.name < b.name ? -1 : 1;
-      if (!da) return 1; if (!db) return -1;
-      return (da - db) * dir;
-    });
+    if (/^TEMPLATE/i.test(c.name)) return false;
+    if (q && c.name.toLowerCase().indexOf(q) < 0) return false;
+    if (S.labels.length && !(c.labels || []).some(function (l) { return S.labels.indexOf(l.id) >= 0; })) return false;
+    if (S.listSel.length && S.listSel.indexOf(c.idList) < 0) return false;
+    if (S.hideDone && c.dueComplete) return false;
+    return true;
+  }
+  function visibleCards() {
+    var out = S.cards.filter(function (c) { return baseFilter(c) && inPeriod(postDate(c)); });
+    out.sort(function (a, b) { return postDate(a) - postDate(b); });
     return out;
   }
+  /* vídeos sem data de postagem (temas potenciais etc.) ficam numa aba recolhida no fim */
+  function noDateCards() {
+    var pos = {}; S.lists.forEach(function (l, i) { pos[l.id] = i; });
+    return S.cards.filter(function (c) { return baseFilter(c) && !postDate(c); }).sort(function (a, b) { return (pos[a.idList] - pos[b.idList]) || ((a.pos || 0) - (b.pos || 0)); });
+  }
 
-  function channelPicker(labels) {
-    var names = labels.filter(function (l) { return S.labels.indexOf(l.id) >= 0; }).map(function (l) { return l.name; });
-    var txt = !names.length ? "Canais: todos" : names.length === 1 ? "Canal: " + names[0] : "Canais: " + names.length + " selecionados";
+  /* seletor de várias opções (usado para canais e para listas) */
+  function multiPicker(key, items, selKey, allTxt, oneTxt, manyTxt, chip) {
+    var sel = S[selKey];
+    var names = items.filter(function (l) { return sel.indexOf(l.id) >= 0; }).map(function (l) { return l.name; });
+    var txt = !names.length ? allTxt : names.length === 1 ? oneTxt + names[0] : manyTxt + names.length + " selecionadas";
     var wrap = h("div", { class: "dd" });
-    var btn = h("button", { "aria-expanded": S.open ? "true" : "false", text: txt + " ▾", onclick: function () { S.open = !S.open; render(); } });
-    wrap.append(btn);
-    if (S.open) {
+    wrap.append(h("button", { "aria-expanded": S.open === key ? "true" : "false", text: txt + " ▾", onclick: function () { S.open = S.open === key ? "" : key; render(); } }));
+    if (S.open === key) {
       var panel = h("div", { class: "ddp" }, [h("div", { class: "row" }, [
-        h("button", { text: "Todos", onclick: function () { S.labels = []; savePrefs(); render(); } }),
-        h("button", { text: "Fechar", onclick: function () { S.open = false; render(); } })
+        h("button", { text: "Todas", onclick: function () { S[selKey] = []; savePrefs(); render(); } }),
+        h("button", { text: "Fechar", onclick: function () { S.open = ""; render(); } })
       ])]);
-      labels.forEach(function (l) {
-        var cb = h("input", { type: "checkbox" }); cb.checked = S.labels.indexOf(l.id) >= 0;
+      items.forEach(function (l) {
+        var cb = h("input", { type: "checkbox" }); cb.checked = sel.indexOf(l.id) >= 0;
         cb.addEventListener("change", function () {
-          if (cb.checked) S.labels.push(l.id); else S.labels = S.labels.filter(function (x) { return x !== l.id; });
+          if (cb.checked) S[selKey].push(l.id); else S[selKey] = S[selKey].filter(function (x) { return x !== l.id; });
           savePrefs(); render();
         });
         var cc = col(l.color);
-        panel.append(h("label", {}, [cb, h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name })]));
+        panel.append(h("label", {}, [cb, chip ? h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name }) : h("span", { text: l.name })]));
       });
       wrap.append(panel);
     }
@@ -323,8 +338,9 @@ function startTable() {
     var bar = h("div", { class: "bar" }, [
       chips,
       h("input", { type: "search", placeholder: "Buscar vídeo", value: S.q, oninput: function (e) { S.q = e.target.value; renderTable(); } }),
-      channelPicker(labels),
-      (function () { var s = h("select", { "aria-label": "Lista", onchange: function (e) { S.list = e.target.value; renderTable(); } }); s.append(h("option", { value: "", text: "Todas as listas" })); S.lists.forEach(function (l) { var o = h("option", { value: l.id, text: l.name }); if (l.id === S.list) o.selected = true; s.append(o); }); return s; })(),
+      multiPicker("canais", labels, "labels", "Canais: todos", "Canal: ", "Canais: ", true),
+      multiPicker("listas", S.lists, "listSel", "Todas as listas", "Lista: ", "Listas: ", false),
+      (function () { var cb = h("input", { type: "checkbox" }); cb.checked = S.hideDone; cb.addEventListener("change", function () { S.hideDone = cb.checked; savePrefs(); renderTable(); }); return h("label", { class: "toggle" }, [cb, "Ocultar concluídos"]); })(),
       h("span", { class: "sp" }),
       S.token || !APP_KEY ? null : h("button", { class: "primary", text: "Autorizar edição", onclick: authorize }),
       h("button", { text: "Atualizar", onclick: load })
@@ -335,7 +351,7 @@ function startTable() {
   }
 
   function renderTable() {
-    var cards = visibleCards();
+    var cards = visibleCards(), noDate = noDateCards();
     var now = Date.now();
     var counts = document.getElementById("counts"); counts.replaceChildren(h("span", {}, [h("b", { text: String(cards.length) }), " vídeos"]));
     S.fields.forEach(function (f) {
@@ -345,13 +361,8 @@ function startTable() {
     var heads = ["Vídeo", "Projeto", "Postagem"].concat(S.fields.map(function (f) { return f.name; }));
     var trh = h("tr"); heads.forEach(function (x, i) { trh.append(h("th", { class: "nosort" + (i === 1 || i === 2 ? " fit" : ""), text: x })); });
     var tb = h("tbody"), lastWeek = null;
-    cards.forEach(function (c) {
-      var pd = postDate(c), wk = pd ? +monday(pd) : -1;
-      if (wk !== lastWeek) {
-        var n = cards.filter(function (x) { var d = postDate(x); return (d ? +monday(d) : -1) === wk; }).length;
-        tb.append(h("tr", { class: "grp" }, [h("td", { colspan: heads.length, text: (pd ? weekLabel(monday(pd)) : "Sem data de postagem") + " · " + n })]));
-        lastWeek = wk;
-      }
+    function row(c) {
+      var pd = postDate(c);
       var postCell;
       var wdTxt = pd ? DIAS[pd.getDay()].charAt(0).toUpperCase() + DIAS[pd.getDay()].slice(1) : "";
       if (S.postField) {
@@ -359,15 +370,30 @@ function startTable() {
         inp.addEventListener("change", function () { setPost(c, inp.value, inp); });
         postCell = h("td", { class: "fit" }, [h("span", { class: "datebtn" }, pd ? [h("span", { class: "wd", text: wdTxt }), h("span", { text: dd(pd) }), inp] : [h("span", { class: "wd", text: "" }), h("span", { class: "note", text: "Definir data" }), inp])]);
       } else postCell = h("td", { class: "fit" }, [h("span", { class: "datebtn" }, [h("span", { class: "wd", text: wdTxt }), h("span", { text: pd ? dd(pd) : "" })])]);
-      var tr = h("tr", {}, [
-        h("td", { class: "name" }, [h("a", { href: c.url, text: c.name, onclick: function (e) { e.preventDefault(); t.showCard(c.id); } }), h("span", { class: "sub", text: listName(c.idList) })]),
+      var ok = h("input", { type: "checkbox", class: "ok", title: "Vídeo pronto (postado)", "aria-label": "Vídeo pronto: " + c.name }); ok.checked = !!c.dueComplete;
+      ok.addEventListener("change", function () { setDone(c, ok.checked, ok); });
+      var tr = h("tr", { class: c.dueComplete ? "done" : null }, [
+        h("td", { class: "name" }, [h("div", { class: "nm" }, [ok, h("div", {}, [h("a", { href: c.url, text: c.name, onclick: function (e) { e.preventDefault(); t.showCard(c.id); } }), h("span", { class: "sub", text: listName(c.idList) })])])]),
         h("td", { class: "fit" }, (c.labels || []).map(function (l) { var cc = col(l.color); return h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name || " " }); })),
         postCell
       ]);
       S.fields.forEach(function (f) { tr.append(h("td", {}, [statusSelect(c, f)])); });
       tb.append(tr);
+    }
+    cards.forEach(function (c) {
+      var wk = +monday(postDate(c));
+      if (wk !== lastWeek) {
+        var n = cards.filter(function (x) { return +monday(postDate(x)) === wk; }).length;
+        tb.append(h("tr", { class: "grp" }, [h("td", { colspan: heads.length, text: weekLabel(new Date(wk)) + " · " + n })]));
+        lastWeek = wk;
+      }
+      row(c);
     });
-    if (!cards.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum vídeo nesse período." })]));
+    if (!cards.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum vídeo com data nesse período." })]));
+    if (noDate.length) {
+      tb.append(h("tr", { class: "grp nodate", onclick: function () { S.showNoDate = !S.showNoDate; renderTable(); } }, [h("td", { colspan: heads.length, text: (S.showNoDate ? "▾ " : "▸ ") + "Sem data de postagem · " + noDate.length + (S.showNoDate ? "" : " (clique para abrir)") })]));
+      if (S.showNoDate) noDate.forEach(row);
+    }
     closeMenu();
     var tbl = document.getElementById("tbl"); tbl.onscroll = closeMenu; tbl.replaceChildren(h("table", {}, [h("thead", {}, [trh]), tb]));
   }

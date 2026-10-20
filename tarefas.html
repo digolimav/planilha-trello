@@ -68,16 +68,21 @@ var app = document.getElementById("app");
 var ADMINS = [/rodrigo/i];
 /* checklists que não são tarefa de produção */
 var IGNORE_CHECKLIST = /aprova/i;
-/* ordem e nome das seções; o item do checklist cai na seção pelo começo do nome */
+/* seções na ordem em que aparecem; "m" é a ordem em que o nome do item é testado (o mais específico primeiro) */
 var SECTIONS = [
-  { k: "R", n: "Roteiros", re: /^roteiro/i, f: /roteir/i },
-  { k: "T", n: "Traduções", re: /^tradu/i, f: /tradu/i },
-  { k: "H", n: "Thumbs", re: /^thumb/i, f: /thumb/i },
-  { k: "E", n: "Edições", re: /^(edi[cç]|montagem)/i, f: /edi[cç]/i },
-  { k: "V", n: "Revisões", re: /^revis/i, f: null },
-  { k: "P", n: "Postagens", re: /^(postagem|publica)/i, f: /publica/i },
-  { k: "O", n: "Outras", re: /./, f: null }
+  { k: "A", n: "Temas", m: 1, re: /^tema/i, f: null },
+  { k: "R", n: "Roteiros", m: 8, re: /roteir/i, f: /roteir/i },
+  { k: "RR", n: "Revisão de roteiro", m: 3, re: /revis.*roteir/i, f: null },
+  { k: "T", n: "Traduções", m: 7, re: /tradu/i, f: /tradu/i },
+  { k: "B", n: "Brainstorm de thumb", m: 2, re: /brainstorm/i, f: null },
+  { k: "H", n: "Thumbs", m: 9, re: /thumb/i, f: /thumb/i },
+  { k: "E", n: "Edições", m: 10, re: /edi[cç]|montagem/i, f: /edi[cç]/i },
+  { k: "V", n: "Revisão de vídeo", m: 4, re: /revis/i, f: null },
+  { k: "M", n: "Metadados", m: 5, re: /metadado/i, f: null },
+  { k: "P", n: "Postagens", m: 6, re: /postagem|publica/i, f: /publica/i },
+  { k: "O", n: "Outras", m: 99, re: /./, f: null }
 ];
+var MATCH = SECTIONS.slice().sort(function (a, b) { return a.m - b.m; });
 var COLORS = {
   green: ["#4bce97", "#0d2e20"], yellow: ["#f5cd47", "#3d2e00"], orange: ["#fea362", "#4a1f00"],
   red: ["#f87168", "#4a120d"], purple: ["#9f8fef", "#231c47"], blue: ["#579dff", "#06224a"],
@@ -180,7 +185,7 @@ function buildTasks() {
       if (IGNORE_CHECKLIST.test(cl.name)) return;
       (cl.checkItems || []).forEach(function (it) {
         if (!it.idMember || !it.due) return;
-        var sec = SECTIONS.find(function (s) { return s.re.test(it.name.trim()); });
+        var sec = MATCH.find(function (s) { return s.re.test(it.name.trim()); });
         var due = day(new Date(it.due));
         var st = statusOf(c, sec, it);
         var inWeek = due >= W0 && due < W1;
@@ -263,8 +268,8 @@ function section(title, items, showItem) {
 function taskRow(x, showItem) {
   var lb = channelLabel(x.card), cc = col(lb && lb.color);
   var st = x.st, sc = col(st.color);
-  var pill = h("button", { class: "pill" + (st.field ? "" : " ro"), style: st.color ? "background:" + sc[0] + ";color:" + sc[1] : "background:#f1f2f4;color:#5e6c84", text: st.text });
-  if (st.field) pill.addEventListener("click", function () { openMenu(pill, x); });
+  var pill = h("button", { class: "pill", style: st.color ? "background:" + sc[0] + ";color:" + sc[1] : "background:#f1f2f4;color:#5e6c84", text: st.text });
+  pill.addEventListener("click", function () { openMenu(pill, x); });
   return h("div", { class: "task" }, [
     h("span", { class: "due" + (x.late ? " late" : "") }, [h("b", { text: DIAS[x.due.getDay()] + " " + dd(x.due) }), x.late ? " · atrasado" : ""]),
     h("span", { class: "tname" }, [
@@ -284,12 +289,20 @@ document.addEventListener("mousedown", function (e) { if (MENU && !MENU.contains
 document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
 function openMenu(btn, x) {
   closeMenu();
-  var f = x.st.field, cur = x.st.opt ? x.st.opt.id : "";
+  var f = x.st.field, cur, opts;
+  if (f) {
+    cur = x.st.opt ? x.st.opt.id : "";
+    opts = [{ id: "", text: "—" }].concat((f.options || []).map(function (o) { return { id: o.id, text: optText(o), o: o }; }));
+  } else {
+    /* etapa sem campo de status: só marca ou desmarca o item do checklist */
+    cur = x.item.state === "complete" ? "complete" : "incomplete";
+    opts = [{ id: "incomplete", text: "A fazer" }, { id: "complete", text: "Feito", o: { color: "green" } }];
+  }
   var menu = h("div", { class: "menu", role: "listbox" });
-  [{ id: "", text: "—" }].concat((f.options || []).map(function (o) { return { id: o.id, text: optText(o), o: o }; })).forEach(function (op) {
+  opts.forEach(function (op) {
     var c = col(op.o && op.o.color);
     var b = h("button", { role: "option" }, [h("span", { class: "chip", style: op.o ? "background:" + c[0] + ";color:" + c[1] : "background:#f1f2f4;color:#8590a2", text: op.text }), op.id === cur ? h("span", { text: "✓", style: "color:#0c66e4" }) : ""]);
-    b.addEventListener("click", function () { closeMenu(); if (op.id !== cur) setStatus(x, f, op.id); });
+    b.addEventListener("click", function () { closeMenu(); if (op.id !== cur) { if (f) setStatus(x, f, op.id); else setDone(x, op.id); } });
     menu.append(b);
   });
   document.body.append(menu); MENU = menu; menu._owner = btn;
@@ -314,6 +327,14 @@ async function setStatus(x, f, idValue) {
       var r2 = await fetch(base + "/checkItem/" + x.item.id + q, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: want }) });
       if (r2.ok) x.item.state = want;
     }
+    render();
+  } catch (e) { var n = document.getElementById("msg"); if (n) { n.textContent = "Não salvou (" + e.message + ")."; n.className = "note err"; } }
+}
+async function setDone(x, state) {
+  try {
+    var res = await fetch("https://api.trello.com/1/cards/" + x.card.id + "/checkItem/" + x.item.id + "?key=" + APP_KEY + "&token=" + S.token, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: state }) });
+    if (!res.ok) throw new Error(res.status);
+    x.item.state = state;
     render();
   } catch (e) { var n = document.getElementById("msg"); if (n) { n.textContent = "Não salvou (" + e.message + ")."; n.className = "note err"; } }
 }

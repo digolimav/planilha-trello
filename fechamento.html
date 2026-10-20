@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fechamento Projeto Curioso</title>
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+<style>
+:root{--ink:#172b4d;--muted:#5e6c84;--line:#dfe1e6;--bg:#fff;--soft:#f4f5f7;--accent:#0c66e4;--late:#ae2e24;--ok:#1f845a}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+#app{padding:16px 20px 40px}
+button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.small{padding:3px 10px;font-size:12px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+.bar .sp{flex:1}
+.month{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:15px}
+.month button{padding:4px 10px}
+.note{color:var(--muted);font-size:13px;margin:0}
+.err{color:var(--late)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:16px;align-items:start}
+.person{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.person h2{margin:0;padding:10px 14px;font-size:15px;background:#5b3a8c;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.person h2 .paid{font-size:12px;font-weight:600;background:#4bce97;color:#0d2e20;border-radius:999px;padding:2px 10px}
+.body{padding:10px 14px 12px}
+.tot{font-size:13px;color:var(--muted);margin:0 0 8px}
+.tot b{color:var(--ink)}
+.tot .lt{color:var(--late);font-weight:600}
+.tot .okc{color:var(--ok);font-weight:600}
+.kinds{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.kind{background:var(--soft);border-radius:6px;padding:3px 9px;font-size:13px}
+.kind b{font-weight:600}
+.carry{background:#fff7e6;color:#7f5f01;border-radius:6px;padding:6px 9px;font-size:13px;margin:0 0 10px}
+.acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+details{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+summary{cursor:pointer;font-size:13px;color:var(--accent)}
+table{border-collapse:collapse;width:100%;margin-top:8px;font-size:12.5px}
+th{text-align:left;color:var(--muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:4px 6px;border-bottom:1px dashed var(--line);vertical-align:top}
+td.n{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.n a{color:var(--ink);text-decoration:none}
+td.n a:hover{text-decoration:underline}
+td.late{color:var(--late);font-weight:600;white-space:nowrap}
+td.ok{color:var(--ok);white-space:nowrap}
+tr.paidrow td{opacity:.5}
+.gate{max-width:520px;margin:40px auto;text-align:center}
+.gate p{margin:0 0 14px}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="app"><p class="note">Carregando…</p></div>
+<script>
+/* Fechamento do mês: o que cada pessoa concluiu no checklist dos cartões, no prazo ou não.
+   Só mostra quantidades; os valores ficam na planilha do Rodrigo. */
+var APP_KEY = "d7dce7c9a2c664af9701e49ee088a979";
+var APP_NAME = "Planilha Projeto Curioso";
+var t = TrelloPowerUp.iframe({ appKey: APP_KEY, appName: APP_NAME });
+var app = document.getElementById("app");
+var ADMINS = [/rodrigo/i];
+var IGNORE_CHECKLIST = /aprova/i;
+/* mesmas etapas do Tarefas; "m" = ordem de teste do nome do item */
+var KINDS = [
+  { k: "A", one: "tema", many: "temas", m: 1, re: /^tema/i },
+  { k: "R", one: "roteiro", many: "roteiros", m: 8, re: /roteir/i },
+  { k: "RR", one: "revisão de roteiro", many: "revisões de roteiro", m: 3, re: /revis.*roteir/i },
+  { k: "T", one: "tradução", many: "traduções", m: 7, re: /tradu/i },
+  { k: "B", one: "brainstorm de thumb", many: "brainstorms de thumb", m: 2, re: /brainstorm/i },
+  { k: "H", one: "thumb", many: "thumbs", m: 9, re: /thumb/i },
+  { k: "E", one: "edição", many: "edições", m: 10, re: /edi[cç]|montagem/i },
+  { k: "ES", one: "edição em espanhol", many: "edições em espanhol", m: 0, re: null },
+  { k: "V", one: "revisão de vídeo", many: "revisões de vídeo", m: 4, re: /revis/i },
+  { k: "M", one: "metadados", many: "metadados", m: 5, re: /metadado/i },
+  { k: "P", one: "postagem", many: "postagens", m: 6, re: /postagem|publica/i },
+  { k: "O", one: "outra", many: "outras", m: 99, re: /./ }
+];
+var MATCH = KINDS.filter(function (k) { return k.re; }).sort(function (a, b) { return a.m - b.m; });
+var MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+var DIAS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+
+function h(tag, attrs, kids) {
+  var el = document.createElement(tag);
+  if (attrs) for (var k in attrs) {
+    if (attrs[k] == null || attrs[k] === false) continue;
+    if (k === "text") el.textContent = attrs[k];
+    else if (k === "style") el.setAttribute("style", attrs[k]);
+    else if (k.slice(0, 2) === "on") el.addEventListener(k.slice(2), attrs[k]);
+    else el.setAttribute(k, attrs[k] === true ? "" : attrs[k]);
+  }
+  (kids || []).forEach(function (c) { if (c != null && c !== "") el.append(c.nodeType ? c : document.createTextNode(c)); });
+  return el;
+}
+function day(x) { return new Date(x.getFullYear(), x.getMonth(), x.getDate()); }
+function dd(x) { return String(x.getDate()).padStart(2, "0") + "/" + String(x.getMonth() + 1).padStart(2, "0"); }
+function first(name) { return (name || "").trim().split(/\s+/)[0].replace(/^./, function (c) { return c.toUpperCase(); }); }
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+function plural(n, k) { return n + " " + (n === 1 ? k.one : k.many); }
+function toast(msg) { var n = h("div", { class: "toast", text: msg }); document.body.append(n); setTimeout(function () { n.remove(); }, 2200); }
+
+var now = new Date();
+var S = { y: now.getFullYear(), mo: now.getMonth() - (now.getDate() <= 10 ? 1 : 0), token: null, paid: {} };
+if (S.mo < 0) { S.mo = 11; S.y--; }
+
+function api(path) {
+  return fetch("https://api.trello.com/1" + path + (path.indexOf("?") < 0 ? "?" : "&") + "key=" + APP_KEY + "&token=" + S.token)
+    .then(function (r) { if (r.status === 401) { S.token = null; throw new Error("401"); } if (!r.ok) throw new Error(r.status); return r.json(); });
+}
+
+async function load() {
+  try {
+    var r = await Promise.all([t.board("id", "members"), t.member("id", "fullName"), t.get("board", "shared", "pagos")]);
+    S.board = r[0]; S.member = r[1]; S.paid = r[2] || {};
+    if (!ADMINS.some(function (re) { return re.test(S.member.fullName || ""); })) {
+      app.replaceChildren(h("p", { class: "note", text: "O fechamento é só para o Rodrigo." })); return;
+    }
+    try { if (await t.getRestApi().isAuthorized()) S.token = await t.getRestApi().getToken(); } catch (e) {}
+    if (!S.token) return renderGate();
+    app.replaceChildren(h("p", { class: "note", text: "Lendo os checklists e o histórico do quadro…" }));
+    /* todos os cartões, inclusive arquivados, com os checklists */
+    var cards = await api("/boards/" + S.board.id + "/cards/all?fields=name,url,labels,closed&checklists=all&checklist_fields=name");
+    S.cards = cards;
+    await loadDone();
+    render();
+  } catch (e) {
+    if (String(e.message) === "401") return renderGate();
+    app.replaceChildren(h("p", { class: "err", text: "Não foi possível ler o quadro: " + (e && e.message || e) }));
+  }
+}
+
+/* quando cada item foi marcado: vem do histórico do quadro (até 6 meses para trás) */
+async function loadDone() {
+  S.doneAt = {};
+  var since = new Date(S.y, S.mo - 6, 1).toISOString(), before = null;
+  for (var page = 0; page < 20; page++) {
+    var acts = await api("/boards/" + S.board.id + "/actions?filter=updateCheckItemStateOnCard&limit=1000&fields=date,data&since=" + since + (before ? "&before=" + before : ""));
+    acts.forEach(function (a) {
+      var it = a.data && a.data.checkItem; if (!it) return;
+      /* as ações vêm da mais nova para a mais antiga: a primeira que aparece é o estado atual */
+      if (!(it.id in S.doneAt)) S.doneAt[it.id] = it.state === "complete" ? new Date(a.date) : null;
+    });
+    if (acts.length < 1000) break;
+    before = acts[acts.length - 1].id;
+  }
+}
+
+function renderGate() {
+  app.replaceChildren(h("div", { class: "gate" }, [
+    h("p", { text: "Para montar o fechamento, libere o acesso uma vez." }),
+    h("button", { class: "primary", text: "Liberar acesso", onclick: async function () {
+      try { await t.getRestApi().authorize({ scope: "read,write", expiration: "never" }); load(); }
+      catch (e) { app.querySelector(".gate p").textContent = "Acesso não liberado. Tente de novo."; }
+    } })
+  ]));
+}
+
+function memberName(id) { var m = (S.board.members || []).find(function (x) { return x.id === id; }); return m ? first(m.fullName) : "Sem conta no quadro"; }
+function isSpanish(card) { return (card.labels || []).some(function (l) { return /no soy|esp/i.test(l.name || ""); }) || /^ESP\b/i.test(card.name); }
+function channel(card) { var l = (card.labels || []).find(function (x) { return x.name && !/travado|ingl/i.test(x.name); }); return l ? l.name : ""; }
+function kindOf(name, card) {
+  var k = MATCH.find(function (x) { return x.re.test(name.trim()); });
+  if (k.k === "E" && isSpanish(card)) return KINDS.find(function (x) { return x.k === "ES"; });
+  return k;
+}
+
+/* todas as tarefas concluídas (com pessoa e data no item) e o dia em que foram concluídas */
+function allDone() {
+  var out = [];
+  S.cards.forEach(function (c) {
+    if (/^TEMPLATE/i.test(c.name)) return;
+    (c.checklists || []).forEach(function (cl) {
+      if (IGNORE_CHECKLIST.test(cl.name)) return;
+      (cl.checkItems || []).forEach(function (it) {
+        if (!it.idMember || !it.due || it.state !== "complete") return;
+        var at = S.doneAt[it.id];
+        if (!at) return; /* marcado antes do período lido */
+        var due = day(new Date(it.due)), d = day(at);
+        var lateDays = Math.round((d - due) / 864e5);
+        out.push({ card: c, item: it, who: it.idMember, kind: kindOf(it.name, c), at: at, due: due, late: lateDays > 0 ? lateDays : 0 });
+      });
+    });
+  });
+  out.sort(function (a, b) { return a.at - b.at; });
+  return out;
+}
+
+function monthRange() { return [new Date(S.y, S.mo, 1), new Date(S.y, S.mo + 1, 1)]; }
+function paidUntil(p) { var v = S.paid[p]; return v && v.until ? new Date(v.until) : null; }
+function isPaid(x) { var u = paidUntil(x.who); return !!u && x.at < u; }
+
+function summaryText(p, inMonth, carry) {
+  var lines = [memberName(p) + " — " + MESES[S.mo] + "/" + S.y];
+  lines.push(kindsLine(inMonth));
+  var late = inMonth.filter(function (x) { return x.late; });
+  lines.push((inMonth.length - late.length) + " no prazo" + (late.length ? ", " + late.length + " com atraso" : ""));
+  if (late.length) late.forEach(function (x) { lines.push("  atraso de " + x.late + " dia" + (x.late > 1 ? "s" : "") + ": " + x.card.name + " (" + x.kind.one + ")"); });
+  if (carry.length) lines.push("+ " + carry.length + " de meses anteriores ainda não pagos: " + kindsLine(carry));
+  return lines.join("\n");
+}
+function kindsLine(list) {
+  return KINDS.map(function (k) { var n = list.filter(function (x) { return x.kind === k; }).length; return n ? plural(n, k) : ""; }).filter(Boolean).join(", ");
+}
+
+async function setPaid(p, untilDate) {
+  var prev = S.paid[p] && S.paid[p].until;
+  if (untilDate) S.paid[p] = { until: untilDate.toISOString(), prev: prev || null, at: new Date().toISOString() };
+  else S.paid[p] = S.paid[p] && S.paid[p].prev ? { until: S.paid[p].prev } : {};
+  try { await t.set("board", "shared", "pagos", S.paid); render(); }
+  catch (e) { toast("Não salvou (" + e.message + ")"); }
+}
+
+function render() {
+  var R = monthRange(), all = allDone();
+  var people = [];
+  all.forEach(function (x) { if (people.indexOf(x.who) < 0) people.push(x.who); });
+  people.sort(function (a, b) { return memberName(a).localeCompare(memberName(b)); });
+  var blocks = [], texts = [];
+  people.forEach(function (p) {
+    var mine = all.filter(function (x) { return x.who === p; });
+    var inMonth = mine.filter(function (x) { return x.at >= R[0] && x.at < R[1]; });
+    var carry = mine.filter(function (x) { return x.at < R[0] && !isPaid(x); });
+    if (!inMonth.length && !carry.length) return;
+    texts.push(summaryText(p, inMonth, carry));
+    blocks.push(personBlock(p, inMonth, carry, R));
+  });
+  var bar = h("div", { class: "bar" }, [
+    h("span", { class: "month" }, [
+      h("button", { "aria-label": "Mês anterior", text: "‹", onclick: function () { S.mo--; if (S.mo < 0) { S.mo = 11; S.y--; } load(); } }),
+      h("span", { text: cap(MESES[S.mo]) + " de " + S.y }),
+      h("button", { "aria-label": "Próximo mês", text: "›", onclick: function () { S.mo++; if (S.mo > 11) { S.mo = 0; S.y++; } load(); } })
+    ]),
+    h("span", { class: "sp" }),
+    texts.length ? h("button", { text: "Copiar resumo de todos", onclick: function () { copy(texts.join("\n\n")); } }) : null,
+    h("button", { text: "Atualizar", onclick: load })
+  ]);
+  app.replaceChildren(bar,
+    h("p", { class: "note", text: "Conta as tarefas concluídas no mês (pelo dia em que foram marcadas), para a pessoa colocada no item do checklist. No prazo = concluída até a data do item.", style: "margin-bottom:12px" }),
+    blocks.length ? h("div", { class: "grid" }, blocks) : h("p", { class: "note", text: "Nenhuma tarefa concluída neste mês." }));
+}
+
+function personBlock(p, inMonth, carry, R) {
+  var late = inMonth.filter(function (x) { return x.late; });
+  var monthPaid = inMonth.length && inMonth.every(isPaid) && carry.length === 0;
+  var box = h("section", { class: "person" });
+  box.append(h("h2", {}, [h("span", { text: memberName(p) }), monthPaid ? h("span", { class: "paid", text: "Pago" }) : null]));
+  var body = h("div", { class: "body" });
+  body.append(h("p", { class: "tot" }, [
+    h("b", { text: String(inMonth.length) }), " tarefa" + (inMonth.length === 1 ? "" : "s") + " no mês · ",
+    h("span", { class: "okc", text: (inMonth.length - late.length) + " no prazo" }),
+    late.length ? h("span", { class: "lt", text: " · " + late.length + " com atraso" }) : ""
+  ]));
+  var kinds = h("div", { class: "kinds" });
+  KINDS.forEach(function (k) { var n = inMonth.filter(function (x) { return x.kind === k; }).length; if (n) kinds.append(h("span", { class: "kind" }, [h("b", { text: String(n) }), " " + (n === 1 ? k.one : k.many)])); });
+  body.append(kinds);
+  if (carry.length) body.append(h("div", { class: "carry", text: "+ " + carry.length + " de meses anteriores ainda não pagos: " + kindsLine(carry) }));
+  var acts = h("div", { class: "acts" });
+  acts.append(h("button", { class: "small", text: "Copiar resumo", onclick: function () { copy(summaryText(p, inMonth, carry)); } }));
+  if (monthPaid) {
+    acts.append(h("button", { class: "small", text: "Desfazer pago", onclick: function () { setPaid(p, null); } }));
+  } else {
+    var until = R[1] < new Date() ? R[1] : new Date();
+    acts.append(h("button", { class: "small primary", text: "Marcar como pago", title: "Marca como pago tudo o que essa pessoa concluiu até o fim de " + MESES[S.mo], onclick: function () { setPaid(p, until); } }));
+  }
+  var v = S.paid[p];
+  if (v && v.until) acts.append(h("span", { class: "note", text: "pago até " + dd(new Date(new Date(v.until) - 1)) }));
+  body.append(acts);
+  var det = h("details", {}, [h("summary", { text: "Ver cada tarefa" })]);
+  var tb = h("tbody");
+  carry.concat(inMonth).forEach(function (x) {
+    tb.append(h("tr", { class: isPaid(x) ? "paidrow" : null }, [
+      h("td", { text: dd(x.at) }),
+      h("td", { class: "n" }, [h("a", { href: x.card.url, text: x.card.name, title: x.card.name, onclick: function (e) { e.preventDefault(); t.showCard(x.card.id); } })]),
+      h("td", { text: cap(x.kind.one) }),
+      h("td", { text: channel(x.card) }),
+      h("td", { text: DIAS[x.due.getDay()] + " " + dd(x.due) }),
+      x.late ? h("td", { class: "late", text: x.late + " dia" + (x.late > 1 ? "s" : "") + " de atraso" }) : h("td", { class: "ok", text: "no prazo" })
+    ]));
+  });
+  det.append(h("table", {}, [h("thead", {}, [h("tr", {}, ["Concluída", "Vídeo", "Etapa", "Canal", "Prazo", ""].map(function (x) { return h("th", { text: x }); }))]), tb]));
+  body.append(det);
+  box.append(body);
+  return box;
+}
+
+function copy(text) {
+  var ta = h("textarea", { style: "position:fixed;opacity:0" }); ta.value = text; document.body.append(ta); ta.select();
+  var ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
+  ta.remove();
+  if (!ok && navigator.clipboard) navigator.clipboard.writeText(text).then(function () { toast("Resumo copiado"); }, function () { toast("Não deu para copiar"); });
+  else toast(ok ? "Resumo copiado" : "Não deu para copiar");
+}
+
+load();
+</script>
+</body>
+</html>

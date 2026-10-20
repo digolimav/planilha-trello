@@ -88,8 +88,8 @@ if (VIEW !== "table") {
   var base = location.href.split("?")[0];
   ICON = base.replace(/index\.html$/, "").replace(/\/?$/, "/") + "icon.svg";
   TrelloPowerUp.initialize({
-    "board-buttons": function () {
-      return [{
+    "board-buttons": function (t0) {
+      return t0.member("fullName").then(function (m) { var B = [{
         icon: { dark: ICON, light: ICON },
         text: "Tarefas",
         callback: function (t) {
@@ -102,6 +102,14 @@ if (VIEW !== "table") {
           return t.modal({ url: base + "?view=table&v=" + Date.now(), fullscreen: true, title: "Planilha" });
         }
       }];
+      if (/rodrigo/i.test(m.fullName || "")) B.push({
+        icon: { dark: ICON, light: ICON },
+        text: "Fechamento",
+        callback: function (t) {
+          return t.modal({ url: base.replace(/index\.html$/, "").replace(/\/?$/, "/") + "fechamento.html?v=" + Date.now(), fullscreen: true, title: "Fechamento do mês" });
+        }
+      });
+      return B; });
     }
   }, APP_KEY ? { appKey: APP_KEY, appName: APP_NAME } : {});
 } else {

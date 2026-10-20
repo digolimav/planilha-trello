@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Temas Projeto Curioso</title>
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+<style>
+:root{--ink:#172b4d;--muted:#5e6c84;--line:#dfe1e6;--bg:#fff;--soft:#f4f5f7;--accent:#0c66e4}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+#app{padding:16px 20px 40px}
+button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.bar input[type=search]{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;min-width:220px}
+.bar .sp{flex:1}
+.note{color:var(--muted);font-size:13px;margin:0}
+.err{color:#ae2e24}
+.counts{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 12px;font-size:13px;color:var(--muted)}
+.counts b{color:var(--ink)}
+.wrap{overflow:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:860px}
+th{position:sticky;top:0;z-index:1;background:#5b3a8c;color:#fff;text-align:left;font-weight:600;padding:9px 10px;white-space:nowrap}
+td{padding:7px 10px;border-top:1px solid var(--line);vertical-align:top}
+tr:hover td{background:var(--soft)}
+td.name{min-width:280px;max-width:420px}
+td.name a{color:var(--ink);text-decoration:none;font-weight:500}
+td.name a:hover{text-decoration:underline}
+td.why{color:var(--muted);font-size:12.5px;max-width:380px}
+td.fit,th.fit{width:1%;white-space:nowrap}
+.grp td{background:var(--soft);font-weight:600;color:var(--muted);text-transform:uppercase;font-size:12px;letter-spacing:.04em}
+.lab{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap}
+.links{font-variant-numeric:tabular-nums;font-size:13px}
+.links.ok{color:#1f845a;font-weight:600}
+.links.low{color:#a54800}
+.links.none{color:#ae2e24}
+.pill{display:inline-flex;align-items:center;gap:6px;min-width:96px;justify-content:space-between;font:inherit;font-size:13px;padding:4px 10px;border-radius:999px;border:0;cursor:pointer;text-align:left}
+.pill::after{content:"\25BE";font-size:10px;opacity:.7}
+.dd{position:relative;display:inline-block}
+.dd>button{min-width:160px;text-align:left}
+.ddp{position:absolute;z-index:5;top:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(9,30,66,.18);padding:8px;min-width:220px;max-height:360px;overflow:auto}
+.ddp label{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:13px}
+.ddp label:hover{background:var(--soft)}
+.ddp .row{display:flex;gap:6px;margin-bottom:6px}
+.ddp .row button{padding:3px 8px;font-size:12px}
+.menu{position:fixed;z-index:50;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(9,30,66,.2);padding:6px;min-width:170px}
+.menu button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:0;background:transparent;padding:4px 6px;border-radius:6px;text-align:left}
+.menu button:hover{background:var(--soft)}
+.menu .chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="app"><p class="note">Carregando…</p></div>
+<script>
+/* Visão de planilha do quadro de temas: por projeto (etiqueta), com etapa, potencial, quantidade de links e o porquê. */
+var APP_KEY = "d7dce7c9a2c664af9701e49ee088a979";
+var APP_NAME = "Planilha Projeto Curioso";
+var t = TrelloPowerUp.iframe({ appKey: APP_KEY, appName: APP_NAME });
+var app = document.getElementById("app");
+var COLORS = {
+  green: ["#4bce97", "#0d2e20"], yellow: ["#f5cd47", "#3d2e00"], orange: ["#fea362", "#4a1f00"],
+  red: ["#f87168", "#4a120d"], purple: ["#9f8fef", "#231c47"], blue: ["#579dff", "#06224a"],
+  sky: ["#6cc3e0", "#0e3240"], lime: ["#94c748", "#25330f"], pink: ["#e774bb", "#40122f"],
+  black: ["#44546f", "#ffffff"], none: ["#f1f2f4", "#44546f"]
+};
+var STAGE = ["#dfe1e6", "#f8e6a0", "#baf3db", "#cce0ff", "#f1f2f4"];
+function col(c) { if (!c) return COLORS.none; var b = c.replace(/_(light|dark)$/, ""); return COLORS[b] || COLORS.none; }
+function h(tag, attrs, kids) {
+  var el = document.createElement(tag);
+  if (attrs) for (var k in attrs) {
+    if (attrs[k] == null || attrs[k] === false) continue;
+    if (k === "text") el.textContent = attrs[k];
+    else if (k === "style") el.setAttribute("style", attrs[k]);
+    else if (k.slice(0, 2) === "on") el.addEventListener(k.slice(2), attrs[k]);
+    else el.setAttribute(k, attrs[k] === true ? "" : attrs[k]);
+  }
+  (kids || []).forEach(function (c) { if (c != null && c !== "") el.append(c.nodeType ? c : document.createTextNode(c)); });
+  return el;
+}
+var S = { q: "", labels: [], lists: null, open: "", token: null };
+
+async function load() {
+  try {
+    var r = await Promise.all([
+      t.board("id", "labels", "customFields"),
+      t.lists("id", "name"),
+      t.cards("id", "name", "desc", "labels", "idList", "url", "pos", "badges", "customFieldItems"),
+      t.get("board", "private", "temas")
+    ]);
+    S.board = r[0]; S.listsAll = r[1]; S.cards = r[2];
+    var p = r[3] || {};
+    if (!S.loaded) { S.labels = p.labels || []; S.lists = p.lists || S.listsAll.filter(function (l) { return !/descart/i.test(l.name); }).map(function (l) { return l.id; }); S.loaded = true; }
+    S.pot = (S.board.customFields || []).find(function (f) { return f.type === "list" && /potencial/i.test(f.name); });
+    try { if (await t.getRestApi().isAuthorized()) S.token = await t.getRestApi().getToken(); } catch (e) {}
+    render();
+  } catch (e) { app.replaceChildren(h("p", { class: "err", text: "Não foi possível ler o quadro: " + (e && e.message || e) })); }
+}
+function savePrefs() { try { t.set("board", "private", "temas", { labels: S.labels, lists: S.lists }); } catch (e) {} }
+async function authorize() {
+  try { await t.getRestApi().authorize({ scope: "read,write", expiration: "never" }); S.token = await t.getRestApi().getToken(); render(); return true; }
+  catch (e) { msg("Autorização cancelada."); return false; }
+}
+function msg(x) { var n = document.getElementById("msg"); if (n) { n.textContent = x; n.className = "note err"; } }
+async function api(method, path, body) {
+  var res = await fetch("https://api.trello.com/1" + path + "?key=" + APP_KEY + "&token=" + S.token, { method: method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) throw new Error(res.status);
+}
+function potOf(c) {
+  if (!S.pot) return null;
+  var it = (c.customFieldItems || []).find(function (i) { return i.idCustomField === S.pot.id; });
+  return it ? (S.pot.options || []).find(function (o) { return o.id === it.idValue; }) : null;
+}
+function stars(c) { var o = potOf(c); return o ? (o.value.text.match(/⭐/g) || []).length : 0; }
+function listIdx(id) { return S.listsAll.findIndex(function (l) { return l.id === id; }); }
+function project(c) { var l = (c.labels || []).find(function (x) { return x.name; }); return l || null; }
+
+function multiPicker(key, items, getSel, setSel, allTxt, manyTxt, chip) {
+  var sel = getSel();
+  var names = items.filter(function (l) { return sel.indexOf(l.id) >= 0; }).map(function (l) { return l.name; });
+  var txt = !names.length || names.length === items.length ? allTxt : names.length === 1 ? names[0] : manyTxt + names.length;
+  var wrap = h("div", { class: "dd" });
+  wrap.append(h("button", { text: txt + " ▾", onclick: function () { S.open = S.open === key ? "" : key; render(); } }));
+  if (S.open === key) {
+    var panel = h("div", { class: "ddp" }, [h("div", { class: "row" }, [
+      h("button", { text: "Todos", onclick: function () { setSel(key === "lists" ? items.map(function (l) { return l.id; }) : []); savePrefs(); render(); } }),
+      h("button", { text: "Fechar", onclick: function () { S.open = ""; render(); } })
+    ])]);
+    items.forEach(function (l) {
+      var cb = h("input", { type: "checkbox" }); cb.checked = sel.indexOf(l.id) >= 0;
+      cb.addEventListener("change", function () { var s = getSel().filter(function (x) { return x !== l.id; }); if (cb.checked) s.push(l.id); setSel(s); savePrefs(); render(); });
+      var cc = col(l.color);
+      panel.append(h("label", {}, [cb, chip ? h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name }) : h("span", { text: l.name })]));
+    });
+    wrap.append(panel);
+  }
+  return wrap;
+}
+
+function render() {
+  var labels = (S.board.labels || []).filter(function (l) { return l.name; });
+  var bar = h("div", { class: "bar" }, [
+    h("input", { type: "search", placeholder: "Buscar tema", value: S.q, oninput: function (e) { S.q = e.target.value; renderTable(); } }),
+    multiPicker("labels", labels, function () { return S.labels; }, function (v) { S.labels = v; }, "Projetos: todos", "Projetos: ", true),
+    multiPicker("lists", S.listsAll, function () { return S.lists; }, function (v) { S.lists = v; }, "Etapas: todas", "Etapas: ", false),
+    h("span", { class: "sp" }),
+    S.token ? null : h("button", { class: "primary", text: "Autorizar edição", onclick: authorize }),
+    h("button", { text: "Atualizar", onclick: load })
+  ]);
+  app.replaceChildren(bar, h("p", { id: "msg", class: "note" }), h("div", { id: "counts", class: "counts" }), h("div", { id: "tbl", class: "wrap" }));
+  renderTable();
+}
+
+function renderTable() {
+  var q = S.q.trim().toLowerCase();
+  var cards = S.cards.filter(function (c) {
+    if (/^TEMPLATE/i.test(c.name)) return false;
+    if (q && (c.name + " " + c.desc).toLowerCase().indexOf(q) < 0) return false;
+    if (S.labels.length && !(c.labels || []).some(function (l) { return S.labels.indexOf(l.id) >= 0; })) return false;
+    return S.lists.indexOf(c.idList) >= 0;
+  });
+  /* agrupa por projeto (etiqueta); dentro, mais estrelas primeiro, depois a etapa mais avançada */
+  var groups = {}, order = [];
+  cards.forEach(function (c) { var p = project(c), k = p ? p.id : "_"; if (!groups[k]) { groups[k] = { lab: p, cards: [] }; order.push(k); } groups[k].cards.push(c); });
+  var labOrder = (S.board.labels || []).map(function (l) { return l.id; });
+  order.sort(function (a, b) { return (a === "_" ? 999 : labOrder.indexOf(a)) - (b === "_" ? 999 : labOrder.indexOf(b)); });
+  var counts = document.getElementById("counts");
+  counts.replaceChildren(h("span", {}, [h("b", { text: String(cards.length) }), " temas"]));
+  S.listsAll.forEach(function (l) { var n = cards.filter(function (c) { return c.idList === l.id; }).length; if (n) counts.append(h("span", {}, [l.name + ": ", h("b", { text: String(n) })])); });
+  var heads = ["Tema", "Etapa", "Potencial", "Links", "Por quê"];
+  var tb = h("tbody");
+  order.forEach(function (k) {
+    var g = groups[k];
+    g.cards.sort(function (a, b) { return stars(b) - stars(a) || listIdx(b.idList) - listIdx(a.idList) || (a.pos - b.pos); });
+    var cc = col(g.lab && g.lab.color);
+    tb.append(h("tr", { class: "grp" }, [h("td", { colspan: heads.length }, [g.lab ? h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1] + ";text-transform:none;letter-spacing:0", text: g.lab.name }) : "Sem projeto", "  · " + g.cards.length])]));
+    g.cards.forEach(function (c) {
+      var n = (c.badges && c.badges.attachments) || 0;
+      var li = listIdx(c.idList), list = S.listsAll[li];
+      var stage = h("button", { class: "pill", style: "background:" + (STAGE[li] || "#f1f2f4"), text: list ? list.name : "" });
+      stage.addEventListener("click", function () { openMenu(stage, S.listsAll.map(function (l, i) { return { id: l.id, text: l.name, bg: STAGE[i] || "#f1f2f4" }; }), c.idList, function (id) { setList(c, id); }); });
+      var o = potOf(c);
+      var pot = h("button", { class: "pill", style: o ? "background:#fff7d6" : "background:#f1f2f4;color:#8590a2", text: o ? o.value.text : "—" });
+      if (S.pot) pot.addEventListener("click", function () { openMenu(pot, [{ id: "", text: "—" }].concat(S.pot.options.map(function (op) { return { id: op.id, text: op.value.text, bg: "#fff7d6" }; })), o ? o.id : "", function (id) { setPot(c, id); }); });
+      var why = (c.desc || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+      tb.append(h("tr", {}, [
+        h("td", { class: "name" }, [h("a", { href: c.url, text: c.name, onclick: function (e) { e.preventDefault(); t.showCard(c.id); } })]),
+        h("td", { class: "fit" }, [stage]),
+        h("td", { class: "fit" }, [pot]),
+        h("td", { class: "fit" }, [h("span", { class: "links " + (n >= 3 ? "ok" : n ? "low" : "none"), text: n + (n === 1 ? " link" : " links") })]),
+        h("td", { class: "why", text: why.length > 160 ? why.slice(0, 157) + "…" : why })
+      ]));
+    });
+  });
+  if (!cards.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum tema com esses filtros." })]));
+  var trh = h("tr"); heads.forEach(function (x, i) { trh.append(h("th", { class: i && i < 4 ? "fit" : null, text: x })); });
+  closeMenu();
+  var tbl = document.getElementById("tbl"); tbl.onscroll = closeMenu; tbl.replaceChildren(h("table", {}, [h("thead", {}, [trh]), tb]));
+}
+
+var MENU = null;
+function closeMenu() { if (MENU) { MENU.remove(); MENU = null; } }
+document.addEventListener("mousedown", function (e) { if (MENU && !MENU.contains(e.target) && e.target !== MENU._owner) closeMenu(); });
+document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
+function openMenu(btn, opts, cur, onPick) {
+  closeMenu();
+  var menu = h("div", { class: "menu", role: "listbox" });
+  opts.forEach(function (op) {
+    var b = h("button", { role: "option" }, [h("span", { class: "chip", style: "background:" + (op.bg || "#f1f2f4"), text: op.text }), op.id === cur ? h("span", { text: "✓", style: "color:#0c66e4" }) : ""]);
+    b.addEventListener("click", function () { closeMenu(); if (op.id !== cur) onPick(op.id); });
+    menu.append(b);
+  });
+  document.body.append(menu); MENU = menu; menu._owner = btn;
+  var r = btn.getBoundingClientRect(), mh = menu.offsetHeight;
+  var top = r.bottom + 4; if (top + mh > innerHeight - 8) top = Math.max(8, r.top - mh - 4);
+  menu.style.top = top + "px"; menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + "px";
+}
+async function setList(c, id) {
+  if (!S.token && !(await authorize())) return;
+  try { await api("PUT", "/cards/" + c.id, { idList: id }); c.idList = id; renderTable(); } catch (e) { msg("Não moveu (" + e.message + ")."); }
+}
+async function setPot(c, id) {
+  if (!S.token && !(await authorize())) return;
+  try {
+    await api("PUT", "/cards/" + c.id + "/customField/" + S.pot.id + "/item", id ? { idValue: id } : { idValue: "", value: "" });
+    c.customFieldItems = (c.customFieldItems || []).filter(function (i) { return i.idCustomField !== S.pot.id; });
+    if (id) c.customFieldItems.push({ idCustomField: S.pot.id, idValue: id });
+    renderTable();
+  } catch (e) { msg("Não salvou (" + e.message + ")."); }
+}
+
+load();
+</script>
+</body>
+</html>

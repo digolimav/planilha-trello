@@ -89,7 +89,15 @@ if (VIEW !== "table") {
   ICON = base.replace(/index\.html$/, "").replace(/\/?$/, "/") + "icon.svg";
   TrelloPowerUp.initialize({
     "board-buttons": function (t0) {
-      return t0.member("fullName").then(function (m) { var B = [{
+      var dir = base.replace(/index\.html$/, "").replace(/\/?$/, "/");
+      return Promise.all([t0.member("fullName"), t0.board("customFields")]).then(function (rr) { var m = rr[0];
+      /* quadro de temas (tem o campo Potencial): só a planilha de temas */
+      if ((rr[1].customFields || []).some(function (f) { return /potencial/i.test(f.name); })) return [{
+        icon: { dark: ICON, light: ICON },
+        text: "Planilha de temas",
+        callback: function (t) { return t.modal({ url: dir + "temas.html?v=" + Date.now(), fullscreen: true, title: "Temas" }); }
+      }];
+      var B = [{
         icon: { dark: ICON, light: ICON },
         text: "Tarefas",
         callback: function (t) {

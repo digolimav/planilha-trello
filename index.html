@@ -390,7 +390,7 @@ function startTable() {
       row(c);
     });
     if (!cards.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum vídeo com data nesse período." })]));
-    if (noDate.length) {
+    if (period === "todos" && noDate.length) {
       tb.append(h("tr", { class: "grp nodate", onclick: function () { S.showNoDate = !S.showNoDate; renderTable(); } }, [h("td", { colspan: heads.length, text: (S.showNoDate ? "▾ " : "▸ ") + "Sem data de postagem · " + noDate.length + (S.showNoDate ? "" : " (clique para abrir)") })]));
       if (S.showNoDate) noDate.forEach(row);
     }

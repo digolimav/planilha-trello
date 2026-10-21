@@ -120,7 +120,7 @@ async function load() {
   try {
     var r = await Promise.all([
       t.board("id", "labels", "customFields", "members"),
-      t.cards("id", "name", "labels", "idList", "url", "customFieldItems", "closed"),
+      t.cards("id", "name", "labels", "idList", "url", "customFieldItems", "closed", "dueComplete"),
       t.member("id", "fullName"),
       t.get("board", "private", "tarefas"),
       t.lists("id", "name")
@@ -141,6 +141,7 @@ async function load() {
     if (!cr.ok) throw new Error(cr.status);
     S.checks = {};
     (await cr.json()).forEach(function (c) { S.checks[c.id] = c.checklists || []; });
+    try { await syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: S.checks, call: api, boardId: S.board.id }); } catch (e) {}
     await reconcile();
     render();
   } catch (e) {
@@ -251,6 +252,65 @@ function openMoveMenu(btn, x, sug) {
   var r = btn.getBoundingClientRect(), mh = menu.offsetHeight;
   var top = r.bottom + 4; if (top + mh > innerHeight - 8) top = Math.max(8, r.top - mh - 4);
   menu.style.top = top + "px"; menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8)) + "px";
+}
+
+/* a lista em que o cartão está fecha as etapas anteriores (a mesma lógica das regras do Butler, sem gastar execuções):
+   FILA DE EDIÇÃO em diante = roteiro e tradução concluídos; VÍDEO APROVADO = edição concluída; VÍDEO POSTADO = publicado e cartão concluído.
+   Só mexe em vídeos com postagem dos últimos 30 dias para frente, e só para concluir (nunca desfaz nada). */
+var LIST_RULES = [
+  { at: /fila.*edi/i, f: [/roteir/i, /tradu/i], it: /rotei|tradu/i },
+  { at: /aprovad/i, f: [/edi[cç]/i], it: /edi[cç]|montagem|revis.*v[ií]deo/i },
+  { at: /postado/i, f: [/publica/i], it: /postag|publica/i, done: true }
+];
+async function syncByList(o) {
+  var last = o.lists.findIndex(function (l) { return /postado/i.test(l.name); });
+  var cut = new Date(); cut.setDate(cut.getDate() - 30);
+  var todo = [];
+  o.cards.forEach(function (c) {
+    if (/^TEMPLATE/i.test(c.name)) return;
+    var pd = o.postDate(c); if (!pd || pd < cut) return;
+    var li = o.lists.findIndex(function (l) { return l.id === c.idList; });
+    if (li < 0 || (last >= 0 && li > last)) return;
+    var rules = LIST_RULES.filter(function (r) { var ri = o.lists.findIndex(function (l) { return r.at.test(l.name); }); return ri >= 0 && li >= ri; });
+    if (rules.length) todo.push({ c: c, rules: rules });
+  });
+  if (!todo.length) return 0;
+  var checks = o.checklists;
+  if (!checks) {
+    checks = {};
+    var all = await (await o.call("GET", "/boards/" + o.boardId + "/checklists?checkItem_fields=name,state")).json();
+    all.forEach(function (cl) { (checks[cl.idCard] = checks[cl.idCard] || []).push(cl); });
+  }
+  var n = 0;
+  for (var i = 0; i < todo.length; i++) {
+    var c = todo[i].c;
+    for (var j = 0; j < todo[i].rules.length; j++) {
+      var r = todo[i].rules[j];
+      for (var k = 0; k < r.f.length; k++) {
+        var f = (o.fields || []).find(function (x) { return x.type === "list" && r.f[k].test(x.name); });
+        if (!f) continue;
+        var cur = (c.customFieldItems || []).find(function (x) { return x.idCustomField === f.id; });
+        var opt = cur && (f.options || []).find(function (op) { return op.id === cur.idValue; });
+        if (opt && /conclu|publicad/i.test(opt.value.text)) continue;
+        var tgt = (f.options || []).find(function (op) { return /conclu|publicad/i.test(op.value.text); });
+        if (!tgt) continue;
+        await o.call("PUT", "/cards/" + c.id + "/customField/" + f.id + "/item", { idValue: tgt.id });
+        c.customFieldItems = (c.customFieldItems || []).filter(function (x) { return x.idCustomField !== f.id; }).concat([{ idCustomField: f.id, idValue: tgt.id }]);
+        n++;
+      }
+      var cls = (checks[c.id] || []).filter(function (cl) { return !/aprova/i.test(cl.name); });
+      for (var a = 0; a < cls.length; a++) {
+        var its = cls[a].checkItems || [];
+        for (var b = 0; b < its.length; b++) {
+          if (!r.it.test(its[b].name) || its[b].state === "complete") continue;
+          await o.call("PUT", "/cards/" + c.id + "/checkItem/" + its[b].id, { state: "complete" });
+          its[b].state = "complete"; n++;
+        }
+      }
+      if (r.done && !c.dueComplete) { await o.call("PUT", "/cards/" + c.id, { dueComplete: true }); c.dueComplete = true; n++; }
+    }
+  }
+  return n;
 }
 
 function buildTasks() {

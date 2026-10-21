@@ -97,6 +97,8 @@ var S = { q: "", labels: [], lists: null, open: "", token: null, sel: {} };
 var PROD = { board: "6a74fccc3cd73e432b92cda8", list: /ESCREVENDO/i };
 var TPL_CHECKLIST = "6ad69a8e90a4f4636a5c41a4";
 /* prazo de cada etapa em dias antes da postagem (null = hoje) */
+/* no envio só se define quem faz o roteiro (produção, revisão e tradução); o resto se ajusta depois, na produção */
+var NO_ENVIO = /rotei|tradu/i;
 var OFFSETS = [[/^tema/i, null], [/brainstorm/i, -3], [/revis.*rotei/i, -3], [/tradu/i, -3], [/rotei/i, -4], [/thumb/i, -1], [/revis/i, -1], [/edi[cç]|montagem/i, -1], [/metadado/i, -1], [/postag|publica/i, 0], [/./, -1]];
 
 async function load() {
@@ -297,13 +299,13 @@ async function openSend() {
     }
     var panel = h("div", { class: "panel" }, [
       h("h2", { text: "Enviar " + ids.length + " tema" + (ids.length > 1 ? "s" : "") + " para a produção" }),
-      h("p", { class: "note", text: "Vão para a lista " + dest.name + ". Escolha a data de postagem; os prazos de cada etapa se ajustam sozinhos (dá para mudar). Quem fica em cada etapa é lembrado por projeto para a próxima vez." })
+      h("p", { class: "note", text: "Vão para a lista " + dest.name + ". Escolha a data de postagem e quem faz o roteiro; os prazos se ajustam sozinhos (dá para mudar). As outras etapas ficam para depois, na produção. Quem você escolhe é lembrado por projeto." })
     ]);
     jobs.forEach(function (j) {
       var lab = project(j.card), cc = col(lab && lab.color), labKey = lab ? lab.id.slice(-6) : "_";
       var post = h("input", { type: "date", "aria-label": "Data de postagem" });
       var rows = h("tbody");
-      j.rows = j.items.map(function (it) {
+      j.rows = j.items.filter(function (it) { return NO_ENVIO.test(it.name); }).map(function (it) {
         var k = offIdx(it.name), key = labKey + ":" + k;
         var sel = h("select", { "aria-label": "Responsável por " + it.name }, [h("option", { value: "", text: "— ninguém —" })].concat(members.map(function (m) { var o = h("option", { value: m.id, text: m.fullName }); if (mem[key] === m.id) o.selected = true; return o; })));
         var due = h("input", { type: "date", "aria-label": "Prazo de " + it.name });
@@ -361,7 +363,7 @@ async function sendOne(j, dest, postF, mem) {
     var cls = await getJ("/cards/" + cid + "/checklists");
     var cl = cls.find(function (x) { return !/aprova/i.test(x.name); });
     var its = cl.checkItems.sort(function (a, b) { return a.pos - b.pos; });
-    j.rows.forEach(function (x, i) { x.it.id = its[i] && its[i].id; });
+    j.rows.forEach(function (x) { var m = its.find(function (i) { return i.name === x.it.name; }); x.it.id = m && m.id; });
   }
   await api("PUT", "/cards/" + cid, { idBoard: PROD.board, idList: dest.id, pos: "bottom" });
   if (postF) await api("PUT", "/cards/" + cid + "/customField/" + postF.id + "/item", { value: { date: parseDay(j.post.value).toISOString() } });

@@ -143,7 +143,7 @@ async function load() {
     (await cr.json()).forEach(function (c) { S.checks[c.id] = c.checklists || []; });
     render();
     /* acerta os status pela lista e pelo checklist em segundo plano, depois redesenha */
-    try { await syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: S.checks, call: api, boardId: S.board.id }); } catch (e) {}
+    try { var regras = (await t.get("board", "shared", "regras")) || {}; await syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: S.checks, call: api, boardId: S.board.id, saved: regras }); } catch (e) {}
     await reconcile();
     render();
   } catch (e) {
@@ -256,25 +256,25 @@ function openMoveMenu(btn, x, sug) {
   menu.style.top = top + "px"; menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8)) + "px";
 }
 
-/* a lista em que o cartão está define o mínimo de cada status (o que já está mais adiantado não volta):
-   ESCREVENDO = roteiro em execução (atrasado se passou do prazo do item do roteiro); REVISÃO ROTEIROS/TRADUÇÃO = roteiro concluído e tradução em execução;
-   FILA DE EDIÇÃO = roteiro e tradução concluídos; EDITANDO = edição em execução; REVISÃO VÍDEO = edição para revisar;
-   VÍDEO APROVADO = edição concluída e publicação em execução; VÍDEO POSTADO = tudo concluído, publicado e cartão concluído.
+/* Regras automáticas: a lista em que o cartão está define o status mínimo de cada etapa (o que já está mais adiantado não volta).
+   As regras ficam salvas no quadro ("Regras" na Planilha); sem regra salva, vale o padrão abaixo.
+   Também: em ESCREVENDO o roteiro vira Atrasado se passou do prazo do item do roteiro, e o cartão ganha o checklist de produção se não tiver.
    Só mexe em vídeos com postagem dos últimos 30 dias para frente. */
 var TPL_CHECKLIST_ID = "6ad69a8e90a4f4636a5c41a4";
-var RT = [/^tema/i, /brainstorm/i], RR = /produ.*rotei|^roteiro$/i, RV = /revis.*rotei/i, TR = /tradu/i;
-var LIST_RULES = [
-  { at: /escrevendo/i, set: { R: "exec" }, chk: RT, tpl: true, late: true },
-  { at: /revis.*rotei/i, set: { R: "done", T: "exec" }, chk: RT.concat([RR]) },
-  { at: /^tradu/i, set: { R: "done", T: "exec" }, chk: RT.concat([RR, RV]) },
-  { at: /fila.*edi/i, set: { R: "done", T: "done" }, chk: RT.concat([RR, RV, TR]) },
-  { at: /editando/i, set: { R: "done", T: "done", E: "exec" }, chk: RT.concat([RR, RV, TR]) },
-  { at: /revis.*v[ií]deo/i, set: { R: "done", T: "done", E: "rev" }, chk: RT.concat([RR, RV, TR]) },
-  { at: /aprovad/i, set: { R: "done", T: "done", E: "done", P: "exec" }, chk: RT.concat([RR, RV, TR, /edi[cç]|montagem/i, /revis.*v[ií]deo/i]) },
-  { at: /postado/i, set: { R: "done", T: "done", E: "done", P: "done" }, chk: RT.concat([RR, RV, TR, /edi[cç]|montagem/i, /revis.*v[ií]deo/i, /postag|publica/i]), done: true }
+var FIELD_KEYS = [["R", /roteir/i], ["T", /tradu/i], ["E", /edi[cç]/i], ["P", /publica/i]];
+var RT = [/^tema/i, /brainstorm/i], RR = /produ.*rotei|^roteiro$/i;
+/* quando a etapa fica Concluída, estes itens do checklist são marcados */
+var ITEMS_BY_FIELD = { R: [RR], T: [/revis.*rotei/i, /tradu/i], E: [/edi[cç]|montagem/i, /revis.*v[ií]deo/i], P: [/postag|publica/i] };
+var DEFAULT_RULES = [
+  [/escrevendo/i, { R: "Em execução" }],
+  [/revis.*rotei/i, { R: "Concluído", T: "Em execução" }],
+  [/^tradu/i, { R: "Concluído", T: "Em execução" }],
+  [/fila.*edi/i, { R: "Concluído", T: "Concluído" }],
+  [/editando/i, { R: "Concluído", T: "Concluído", E: "Em execução" }],
+  [/revis.*v[ií]deo/i, { R: "Concluído", T: "Concluído", E: "Revisar" }],
+  [/aprovad/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Em execução" }],
+  [/postado/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Publicado", done: true }]
 ];
-var FIELD_RE = { R: /roteir/i, T: /tradu/i, E: /edi[cç]/i, P: /publica/i };
-var TARGET = { exec: [1, /execu/i], late: [2, /atrasad/i], rev: [3, /revisar/i], done: [4, /conclu|publicad/i] };
 function statusRank(txt) {
   if (!txt || /n[aã]o inic/i.test(txt)) return 0;
   if (/conclu|publicad/i.test(txt)) return 4;
@@ -282,7 +282,18 @@ function statusRank(txt) {
   if (/atrasad/i.test(txt)) return 2;
   return 1;
 }
+/* regras por lista: as salvas no quadro ou o padrão */
+function rulesFor(lists, saved) {
+  var out = {};
+  lists.forEach(function (l) {
+    if (saved && saved[l.id]) { out[l.id] = saved[l.id]; return; }
+    var d = DEFAULT_RULES.find(function (x) { return x[0].test(l.name); });
+    if (d) out[l.id] = d[1];
+  });
+  return out;
+}
 async function syncByList(o) {
+  var rules = rulesFor(o.lists, o.saved);
   var last = o.lists.findIndex(function (l) { return /postado/i.test(l.name); });
   var cut = new Date(); cut.setDate(cut.getDate() - 30);
   var today = new Date(); today.setHours(0, 0, 0, 0);
@@ -292,8 +303,7 @@ async function syncByList(o) {
     var pd = o.postDate(c); if (!pd || pd < cut) return;
     var li = o.lists.findIndex(function (l) { return l.id === c.idList; });
     if (li < 0 || (last >= 0 && li > last)) return;
-    var rule = LIST_RULES.find(function (r) { return r.at.test(o.lists[li].name); });
-    if (rule) todo.push({ c: c, r: rule });
+    if (rules[c.idList]) todo.push({ c: c, r: rules[c.idList], writing: /escrevendo/i.test(o.lists[li].name) });
   });
   if (!todo.length) return 0;
   var checks = o.checklists;
@@ -306,19 +316,20 @@ async function syncByList(o) {
   for (var i = 0; i < todo.length; i++) {
     var c = todo[i].c, r = todo[i].r;
     var cls = (checks[c.id] || []).filter(function (cl) { return !/aprova/i.test(cl.name); });
-    if (r.tpl && !cls.length) { await o.call("POST", "/cards/" + c.id + "/checklists", { idChecklistSource: TPL_CHECKLIST_ID }); n++; continue; }
+    if (todo[i].writing && !cls.length) { await o.call("POST", "/cards/" + c.id + "/checklists", { idChecklistSource: TPL_CHECKLIST_ID }); n++; continue; }
     var items = []; cls.forEach(function (cl) { (cl.checkItems || []).forEach(function (it) { items.push(it); }); });
-    var set = Object.assign({}, r.set);
-    if (r.late && items.some(function (it) { return RR.test(it.name) && it.state !== "complete" && it.due && new Date(it.due) < today; })) set.R = "late";
-    var keys = Object.keys(set);
-    for (var k = 0; k < keys.length; k++) {
-      var f = (o.fields || []).find(function (x) { return x.type === "list" && FIELD_RE[keys[k]].test(x.name); });
+    var set = {}; FIELD_KEYS.forEach(function (fk) { if (r[fk[0]]) set[fk[0]] = r[fk[0]]; });
+    if (todo[i].writing && items.some(function (it) { return RR.test(it.name) && it.state !== "complete" && it.due && new Date(it.due) < today; })) set.R = "Atrasado";
+    var chk = RT.slice();
+    for (var k = 0; k < FIELD_KEYS.length; k++) {
+      var key = FIELD_KEYS[k][0], txt = set[key]; if (!txt) continue;
+      if (statusRank(txt) === 4) chk = chk.concat(ITEMS_BY_FIELD[key]);
+      var f = (o.fields || []).find(function (x) { return x.type === "list" && FIELD_KEYS[k][1].test(x.name); });
       if (!f) continue;
-      var tg = TARGET[set[keys[k]]];
       var cur = (c.customFieldItems || []).find(function (x) { return x.idCustomField === f.id; });
       var opt = cur && (f.options || []).find(function (op) { return op.id === cur.idValue; });
-      if (statusRank(opt && opt.value.text) >= tg[0]) continue;
-      var want = (f.options || []).find(function (op) { return tg[1].test(op.value.text); });
+      if (statusRank(opt && opt.value.text) >= statusRank(txt)) continue;
+      var want = (f.options || []).find(function (op) { return op.value.text.trim().toLowerCase() === txt.trim().toLowerCase(); });
       if (!want) continue;
       await o.call("PUT", "/cards/" + c.id + "/customField/" + f.id + "/item", { idValue: want.id });
       c.customFieldItems = (c.customFieldItems || []).filter(function (x) { return x.idCustomField !== f.id; }).concat([{ idCustomField: f.id, idValue: want.id }]);
@@ -326,7 +337,7 @@ async function syncByList(o) {
     }
     for (var b = 0; b < items.length; b++) {
       var it = items[b];
-      if (it.state === "complete" || !r.chk.some(function (re) { return re.test(it.name.trim()); })) continue;
+      if (it.state === "complete" || !chk.some(function (re) { return re.test(it.name.trim()); })) continue;
       await o.call("PUT", "/cards/" + c.id + "/checkItem/" + it.id, { state: "complete" });
       it.state = "complete"; n++;
     }
@@ -334,6 +345,7 @@ async function syncByList(o) {
   }
   return n;
 }
+
 
 function buildTasks() {
   var W0 = addDays(monday(new Date()), S.week * 7), W1 = addDays(W0, 7), today = day(new Date());

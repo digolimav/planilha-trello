@@ -73,6 +73,14 @@ select.st{appearance:none;-webkit-appearance:none;width:100%;min-width:120px;fon
 .menu button:hover,.menu button:focus{background:var(--soft);outline:none}
 .menu .chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:13px}
 .menu .ok{color:var(--accent);font-size:13px}
+.ov{position:fixed;inset:0;z-index:60;background:rgba(9,30,66,.45);display:flex;justify-content:center;align-items:flex-start;padding:24px;overflow:auto}
+.panel{background:#fff;border-radius:12px;max-width:900px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(9,30,66,.35)}
+.panel h2{margin:0 0 4px;font-size:17px}
+table.rules{min-width:0}
+table.rules td{padding:5px 10px}
+table.rules td.rl{font-weight:600;white-space:nowrap}
+table.rules select{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.foot{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:12px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -172,6 +180,7 @@ function startTable() {
         t.cards("id", "name", "due", "dueComplete", "labels", "idList", "url", "pos", "customFieldItems")
       ]);
       S.board = r[0]; S.lists = r[1]; S.cards = r[2];
+      try { S.regras = (await t.get("board", "shared", "regras")) || {}; var me = await t.member("fullName"); S.admin = /rodrigo/i.test(me.fullName || ""); } catch (e) { S.regras = {}; }
       if (!S.prefsLoaded) { await loadPrefs(); S.prefsLoaded = true; }
       S.labels = S.labels.filter(function (id) { return (S.board.labels || []).some(function (l) { return l.id === id; }); });
       S.listSel = S.listSel.filter(function (id) { return S.lists.some(function (l) { return l.id === id; }); });
@@ -182,7 +191,7 @@ function startTable() {
       await loadBrainstorm();
       render();
       /* acerta os status pela lista em segundo plano; quando muda algo, redesenha a tabela */
-      if (S.token) syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: null, call: api, boardId: S.board.id }).then(function (n) { if (n) renderTable(); }, function () {});
+      if (S.token) syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: null, call: api, boardId: S.board.id, saved: S.regras }).then(function (n) { if (n) renderTable(); }, function () {});
     } catch (e) {
       app.replaceChildren(h("p", { class: "err", text: "Não foi possível ler o quadro: " + (e && e.message || e) }));
     }
@@ -193,25 +202,25 @@ function startTable() {
   function optOf(f, id) { return (f.options || []).find(function (o) { return o.id === id; }); }
   function optText(o) { return o ? (o.value && o.value.text) || "" : ""; }
   function listName(id) { var l = S.lists.find(function (x) { return x.id === id; }); return l ? l.name : ""; }
-  /* a lista em que o cartão está define o mínimo de cada status (o que já está mais adiantado não volta):
-     ESCREVENDO = roteiro em execução (atrasado se passou do prazo do item do roteiro); REVISÃO ROTEIROS/TRADUÇÃO = roteiro concluído e tradução em execução;
-     FILA DE EDIÇÃO = roteiro e tradução concluídos; EDITANDO = edição em execução; REVISÃO VÍDEO = edição para revisar;
-     VÍDEO APROVADO = edição concluída e publicação em execução; VÍDEO POSTADO = tudo concluído, publicado e cartão concluído.
+  /* Regras automáticas: a lista em que o cartão está define o status mínimo de cada etapa (o que já está mais adiantado não volta).
+     As regras ficam salvas no quadro ("Regras" na Planilha); sem regra salva, vale o padrão abaixo.
+     Também: em ESCREVENDO o roteiro vira Atrasado se passou do prazo do item do roteiro, e o cartão ganha o checklist de produção se não tiver.
      Só mexe em vídeos com postagem dos últimos 30 dias para frente. */
   var TPL_CHECKLIST_ID = "6ad69a8e90a4f4636a5c41a4";
-  var RT = [/^tema/i, /brainstorm/i], RR = /produ.*rotei|^roteiro$/i, RV = /revis.*rotei/i, TR = /tradu/i;
-  var LIST_RULES = [
-    { at: /escrevendo/i, set: { R: "exec" }, chk: RT, tpl: true, late: true },
-    { at: /revis.*rotei/i, set: { R: "done", T: "exec" }, chk: RT.concat([RR]) },
-    { at: /^tradu/i, set: { R: "done", T: "exec" }, chk: RT.concat([RR, RV]) },
-    { at: /fila.*edi/i, set: { R: "done", T: "done" }, chk: RT.concat([RR, RV, TR]) },
-    { at: /editando/i, set: { R: "done", T: "done", E: "exec" }, chk: RT.concat([RR, RV, TR]) },
-    { at: /revis.*v[ií]deo/i, set: { R: "done", T: "done", E: "rev" }, chk: RT.concat([RR, RV, TR]) },
-    { at: /aprovad/i, set: { R: "done", T: "done", E: "done", P: "exec" }, chk: RT.concat([RR, RV, TR, /edi[cç]|montagem/i, /revis.*v[ií]deo/i]) },
-    { at: /postado/i, set: { R: "done", T: "done", E: "done", P: "done" }, chk: RT.concat([RR, RV, TR, /edi[cç]|montagem/i, /revis.*v[ií]deo/i, /postag|publica/i]), done: true }
+  var FIELD_KEYS = [["R", /roteir/i], ["T", /tradu/i], ["E", /edi[cç]/i], ["P", /publica/i]];
+  var RT = [/^tema/i, /brainstorm/i], RR = /produ.*rotei|^roteiro$/i;
+  /* quando a etapa fica Concluída, estes itens do checklist são marcados */
+  var ITEMS_BY_FIELD = { R: [RR], T: [/revis.*rotei/i, /tradu/i], E: [/edi[cç]|montagem/i, /revis.*v[ií]deo/i], P: [/postag|publica/i] };
+  var DEFAULT_RULES = [
+    [/escrevendo/i, { R: "Em execução" }],
+    [/revis.*rotei/i, { R: "Concluído", T: "Em execução" }],
+    [/^tradu/i, { R: "Concluído", T: "Em execução" }],
+    [/fila.*edi/i, { R: "Concluído", T: "Concluído" }],
+    [/editando/i, { R: "Concluído", T: "Concluído", E: "Em execução" }],
+    [/revis.*v[ií]deo/i, { R: "Concluído", T: "Concluído", E: "Revisar" }],
+    [/aprovad/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Em execução" }],
+    [/postado/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Publicado", done: true }]
   ];
-  var FIELD_RE = { R: /roteir/i, T: /tradu/i, E: /edi[cç]/i, P: /publica/i };
-  var TARGET = { exec: [1, /execu/i], late: [2, /atrasad/i], rev: [3, /revisar/i], done: [4, /conclu|publicad/i] };
   function statusRank(txt) {
     if (!txt || /n[aã]o inic/i.test(txt)) return 0;
     if (/conclu|publicad/i.test(txt)) return 4;
@@ -219,7 +228,18 @@ function startTable() {
     if (/atrasad/i.test(txt)) return 2;
     return 1;
   }
+  /* regras por lista: as salvas no quadro ou o padrão */
+  function rulesFor(lists, saved) {
+    var out = {};
+    lists.forEach(function (l) {
+      if (saved && saved[l.id]) { out[l.id] = saved[l.id]; return; }
+      var d = DEFAULT_RULES.find(function (x) { return x[0].test(l.name); });
+      if (d) out[l.id] = d[1];
+    });
+    return out;
+  }
   async function syncByList(o) {
+    var rules = rulesFor(o.lists, o.saved);
     var last = o.lists.findIndex(function (l) { return /postado/i.test(l.name); });
     var cut = new Date(); cut.setDate(cut.getDate() - 30);
     var today = new Date(); today.setHours(0, 0, 0, 0);
@@ -229,8 +249,7 @@ function startTable() {
       var pd = o.postDate(c); if (!pd || pd < cut) return;
       var li = o.lists.findIndex(function (l) { return l.id === c.idList; });
       if (li < 0 || (last >= 0 && li > last)) return;
-      var rule = LIST_RULES.find(function (r) { return r.at.test(o.lists[li].name); });
-      if (rule) todo.push({ c: c, r: rule });
+      if (rules[c.idList]) todo.push({ c: c, r: rules[c.idList], writing: /escrevendo/i.test(o.lists[li].name) });
     });
     if (!todo.length) return 0;
     var checks = o.checklists;
@@ -243,19 +262,20 @@ function startTable() {
     for (var i = 0; i < todo.length; i++) {
       var c = todo[i].c, r = todo[i].r;
       var cls = (checks[c.id] || []).filter(function (cl) { return !/aprova/i.test(cl.name); });
-      if (r.tpl && !cls.length) { await o.call("POST", "/cards/" + c.id + "/checklists", { idChecklistSource: TPL_CHECKLIST_ID }); n++; continue; }
+      if (todo[i].writing && !cls.length) { await o.call("POST", "/cards/" + c.id + "/checklists", { idChecklistSource: TPL_CHECKLIST_ID }); n++; continue; }
       var items = []; cls.forEach(function (cl) { (cl.checkItems || []).forEach(function (it) { items.push(it); }); });
-      var set = Object.assign({}, r.set);
-      if (r.late && items.some(function (it) { return RR.test(it.name) && it.state !== "complete" && it.due && new Date(it.due) < today; })) set.R = "late";
-      var keys = Object.keys(set);
-      for (var k = 0; k < keys.length; k++) {
-        var f = (o.fields || []).find(function (x) { return x.type === "list" && FIELD_RE[keys[k]].test(x.name); });
+      var set = {}; FIELD_KEYS.forEach(function (fk) { if (r[fk[0]]) set[fk[0]] = r[fk[0]]; });
+      if (todo[i].writing && items.some(function (it) { return RR.test(it.name) && it.state !== "complete" && it.due && new Date(it.due) < today; })) set.R = "Atrasado";
+      var chk = RT.slice();
+      for (var k = 0; k < FIELD_KEYS.length; k++) {
+        var key = FIELD_KEYS[k][0], txt = set[key]; if (!txt) continue;
+        if (statusRank(txt) === 4) chk = chk.concat(ITEMS_BY_FIELD[key]);
+        var f = (o.fields || []).find(function (x) { return x.type === "list" && FIELD_KEYS[k][1].test(x.name); });
         if (!f) continue;
-        var tg = TARGET[set[keys[k]]];
         var cur = (c.customFieldItems || []).find(function (x) { return x.idCustomField === f.id; });
         var opt = cur && (f.options || []).find(function (op) { return op.id === cur.idValue; });
-        if (statusRank(opt && opt.value.text) >= tg[0]) continue;
-        var want = (f.options || []).find(function (op) { return tg[1].test(op.value.text); });
+        if (statusRank(opt && opt.value.text) >= statusRank(txt)) continue;
+        var want = (f.options || []).find(function (op) { return op.value.text.trim().toLowerCase() === txt.trim().toLowerCase(); });
         if (!want) continue;
         await o.call("PUT", "/cards/" + c.id + "/customField/" + f.id + "/item", { idValue: want.id });
         c.customFieldItems = (c.customFieldItems || []).filter(function (x) { return x.idCustomField !== f.id; }).concat([{ idCustomField: f.id, idValue: want.id }]);
@@ -263,7 +283,7 @@ function startTable() {
       }
       for (var b = 0; b < items.length; b++) {
         var it = items[b];
-        if (it.state === "complete" || !r.chk.some(function (re) { return re.test(it.name.trim()); })) continue;
+        if (it.state === "complete" || !chk.some(function (re) { return re.test(it.name.trim()); })) continue;
         await o.call("PUT", "/cards/" + c.id + "/checkItem/" + it.id, { state: "complete" });
         it.state = "complete"; n++;
       }
@@ -271,6 +291,7 @@ function startTable() {
     }
     return n;
   }
+
   /* temas do Brainstorm que já têm data de postagem aparecem na semana deles, só para ver */
   var BRAIN = "6ad78bf2e6a07b19369b36e6";
   async function loadBrainstorm() {
@@ -486,6 +507,49 @@ function startTable() {
     return wrap;
   }
 
+  /* ---------- tela de regras automáticas (só o Rodrigo edita) ---------- */
+  function openRules() {
+    var rules = rulesFor(S.lists, S.regras);
+    var last = S.lists.findIndex(function (l) { return /postado/i.test(l.name); });
+    var lists = S.lists.slice(0, last >= 0 ? last + 1 : S.lists.length);
+    var fields = FIELD_KEYS.map(function (fk) { return { k: fk[0], f: (S.board.customFields || []).find(function (x) { return x.type === "list" && fk[1].test(x.name); }) }; }).filter(function (x) { return x.f; });
+    var edit = S.admin;
+    var tb = h("tbody"), rows = [];
+    lists.forEach(function (l) {
+      var r = rules[l.id] || {};
+      var tr = h("tr", {}, [h("td", { class: "rl", text: l.name })]);
+      var row = { id: l.id, sels: {}, done: null };
+      fields.forEach(function (x) {
+        var sel = h("select", { disabled: !edit, "aria-label": x.f.name + " em " + l.name }, [h("option", { value: "", text: "— não mexe —" })].concat((x.f.options || []).map(function (op) { var o = h("option", { value: op.value.text, text: op.value.text }); if ((r[x.k] || "") === op.value.text) o.selected = true; return o; })));
+        row.sels[x.k] = sel;
+        tr.append(h("td", {}, [sel]));
+      });
+      var cb = h("input", { type: "checkbox", disabled: !edit, "aria-label": "Cartão concluído em " + l.name }); cb.checked = !!r.done; row.done = cb;
+      tr.append(h("td", { style: "text-align:center" }, [cb]));
+      tb.append(tr); rows.push(row);
+    });
+    var trh = h("tr", {}, [h("th", { text: "Quando o cartão está em…" })].concat(fields.map(function (x) { return h("th", { text: x.f.name }); })).concat([h("th", { text: "Cartão concluído" })]));
+    var info = h("span", { class: "note" });
+    var ov = h("div", { class: "ov" });
+    var save = h("button", { class: "primary", text: "Salvar regras", disabled: !edit, onclick: async function () {
+      var out = {};
+      rows.forEach(function (row) { var o = {}; Object.keys(row.sels).forEach(function (k) { if (row.sels[k].value) o[k] = row.sels[k].value; }); if (row.done.checked) o.done = true; out[row.id] = o; });
+      try { await t.set("board", "shared", "regras", out); S.regras = out; info.textContent = "Salvo. Vale a partir da próxima vez que a Planilha ou o Tarefas abrirem."; info.className = "note"; }
+      catch (e) { info.textContent = "Não salvou (" + e.message + ")."; info.className = "note err"; }
+    } });
+    var reset = h("button", { text: "Voltar ao padrão", disabled: !edit, onclick: async function () {
+      try { await t.set("board", "shared", "regras", {}); S.regras = {}; ov.remove(); openRules(); } catch (e) {}
+    } });
+    ov.append(h("div", { class: "panel" }, [
+      h("h2", { text: "Regras automáticas" }),
+      h("p", { class: "note", text: "Quando o cartão está na lista da esquerda, cada etapa fica pelo menos no status escolhido. O que já está mais adiantado não volta. Quando uma etapa vira Concluído, os itens dela no checklist são marcados. Em ESCREVENDO, o roteiro vira Atrasado se passou do prazo do item do roteiro." + (edit ? "" : " Só o Rodrigo pode mudar as regras.") }),
+      h("div", { class: "wrap", style: "margin-top:10px" }, [h("table", { class: "rules" }, [h("thead", {}, [trh]), tb])]),
+      h("div", { class: "foot" }, [info, reset, h("button", { text: "Fechar", onclick: function () { ov.remove(); } }), save])
+    ]));
+    document.body.append(ov);
+  }
+
+
   function render() {
     var labels = (S.board.labels || []).filter(function (l) { return l.name; });
     var chips = h("div", { class: "chips", role: "group", "aria-label": "Período" });
@@ -500,6 +564,7 @@ function startTable() {
       (function () { var cb = h("input", { type: "checkbox" }); cb.checked = S.hideDone; cb.addEventListener("change", function () { S.hideDone = cb.checked; savePrefs(); renderTable(); }); return h("label", { class: "toggle" }, [cb, "Ocultar concluídos"]); })(),
       h("span", { class: "sp" }),
       S.token || !APP_KEY ? null : h("button", { class: "primary", text: "Autorizar edição", onclick: authorize }),
+      h("button", { text: "Regras", title: "Regras automáticas de status por lista", onclick: openRules }),
       h("button", { text: "Atualizar", onclick: load })
     ]);
     var warn = !S.postField ? "Sem o campo de data \"Data de postagem\" no quadro: usando a data de entrega como postagem." : (S.fields.length ? "" : "Este quadro ainda não tem campos personalizados do tipo lista.");

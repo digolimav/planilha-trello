@@ -48,6 +48,20 @@ td.fit,th.fit{width:1%;white-space:nowrap}
 .menu button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:0;background:transparent;padding:4px 6px;border-radius:6px;text-align:left}
 .menu button:hover{background:var(--soft)}
 .menu .chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:13px}
+td.ck,th.ck{width:1%;padding-right:0}
+td.ck input{width:16px;height:16px;cursor:pointer;margin-top:3px}
+.sendbar{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:10px;background:#e9f2ff;border:1px solid #85b8ff;border-radius:8px;padding:8px 12px;margin:0 0 10px;font-size:13px}
+.ov{position:fixed;inset:0;z-index:60;background:rgba(9,30,66,.45);display:flex;justify-content:center;align-items:flex-start;padding:24px;overflow:auto}
+.panel{background:#fff;border-radius:12px;max-width:860px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(9,30,66,.35)}
+.panel h2{margin:0 0 4px;font-size:17px}
+.sc{border:1px solid var(--line);border-radius:10px;margin:12px 0;overflow:hidden}
+.sc .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;background:var(--soft)}
+.sc .hd b{flex:1;min-width:200px}
+.sc table{min-width:0;font-size:13px}
+.sc td{border-top:1px solid var(--line);padding:4px 12px;vertical-align:middle}
+.sc select,.sc input[type=date]{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.sc .st{font-size:12px;color:var(--muted)}
+.foot{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:12px}
 </style>
 </head>
 <body>
@@ -78,7 +92,12 @@ function h(tag, attrs, kids) {
   (kids || []).forEach(function (c) { if (c != null && c !== "") el.append(c.nodeType ? c : document.createTextNode(c)); });
   return el;
 }
-var S = { q: "", labels: [], lists: null, open: "", token: null };
+var S = { q: "", labels: [], lists: null, open: "", token: null, sel: {} };
+/* para onde vai o tema aprovado */
+var PROD = { board: "6a74fccc3cd73e432b92cda8", list: /ESCREVENDO/i };
+var TPL_CHECKLIST = "6ad69a8e90a4f4636a5c41a4";
+/* prazo de cada etapa em dias antes da postagem (null = hoje) */
+var OFFSETS = [[/^tema/i, null], [/brainstorm/i, -3], [/revis.*rotei/i, -3], [/tradu/i, -3], [/rotei/i, -4], [/thumb/i, -1], [/revis/i, -1], [/edi[cç]|montagem/i, -1], [/metadado/i, -1], [/postag|publica/i, 0], [/./, -1]];
 
 async function load() {
   try {
@@ -92,6 +111,7 @@ async function load() {
     var p = r[3] || {};
     if (!S.loaded) { S.labels = p.labels || []; S.lists = p.lists || S.listsAll.filter(function (l) { return !/descart/i.test(l.name); }).map(function (l) { return l.id; }); S.loaded = true; }
     S.pot = (S.board.customFields || []).find(function (f) { return f.type === "list" && /potencial/i.test(f.name); });
+    S.whyF = (S.board.customFields || []).find(function (f) { return f.type === "text" && /por qu/i.test(f.name); });
     try { if (await t.getRestApi().isAuthorized()) S.token = await t.getRestApi().getToken(); } catch (e) {}
     render();
   } catch (e) { app.replaceChildren(h("p", { class: "err", text: "Não foi possível ler o quadro: " + (e && e.message || e) })); }
@@ -115,6 +135,7 @@ function stars(c) { var o = potOf(c); return o ? (o.value.text.match(/⭐/g) || 
 function listIdx(id) { return S.listsAll.findIndex(function (l) { return l.id === id; }); }
 /* "Por quê": a seção "Por quê / Potencial" da descrição; descrição fora do modelo aparece inteira */
 function whyOf(c) {
+  if (S.whyF) { var fi = (c.customFieldItems || []).find(function (i) { return i.idCustomField === S.whyF.id; }); if (fi && fi.value && fi.value.text) return fi.value.text.replace(/\s+/g, " ").trim(); }
   var d = c.desc || "";
   var m = d.match(/Por qu[eê][^\n]*\n([\s\S]*?)(\n#|$)/i);
   var txt = m ? m[1] : (/^\s*#/.test(d) ? "" : d);
@@ -181,7 +202,7 @@ function renderTable() {
   var counts = document.getElementById("counts");
   counts.replaceChildren(h("span", {}, [h("b", { text: String(cards.length) }), " temas"]));
   S.listsAll.forEach(function (l) { var n = cards.filter(function (c) { return c.idList === l.id; }).length; if (n) counts.append(h("span", {}, [l.name + ": ", h("b", { text: String(n) })])); });
-  var heads = ["Tema", "Etapa", "Potencial", "Links", "Por quê"];
+  var heads = ["", "Tema", "Etapa", "Potencial", "Links", "Por quê"];
   var tb = h("tbody");
   order.forEach(function (k) {
     var g = groups[k];
@@ -197,7 +218,10 @@ function renderTable() {
       var pot = h("button", { class: "pill", style: o ? "background:#fff7d6" : "background:#f1f2f4;color:#8590a2", text: o ? o.value.text : "—" });
       if (S.pot) pot.addEventListener("click", function () { openMenu(pot, [{ id: "", text: "—" }].concat(S.pot.options.map(function (op) { return { id: op.id, text: op.value.text, bg: "#fff7d6" }; })), o ? o.id : "", function (id) { setPot(c, id); }); });
       var why = whyOf(c);
+      var ck = h("input", { type: "checkbox", "aria-label": "Selecionar " + c.name }); ck.checked = !!S.sel[c.id];
+      ck.addEventListener("change", function () { if (ck.checked) S.sel[c.id] = true; else delete S.sel[c.id]; renderTable(); });
       tb.append(h("tr", {}, [
+        h("td", { class: "ck" }, [ck]),
         h("td", { class: "name" }, [h("a", { href: c.url, text: c.name, onclick: function (e) { e.preventDefault(); t.showCard(c.id); } })]),
         h("td", { class: "fit" }, [stage]),
         h("td", { class: "fit" }, [pot]),
@@ -207,9 +231,13 @@ function renderTable() {
     });
   });
   if (!cards.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum tema com esses filtros." })]));
-  var trh = h("tr"); heads.forEach(function (x, i) { trh.append(h("th", { class: i && i < 4 ? "fit" : null, text: x })); });
+  var trh = h("tr"); heads.forEach(function (x, i) { trh.append(h("th", { class: i === 0 ? "ck" : i > 1 && i < 5 ? "fit" : null, text: x })); });
   closeMenu();
+  var nsel = Object.keys(S.sel).filter(function (id) { return S.cards.some(function (c) { return c.id === id; }); }).length;
+  var bar = nsel ? h("div", { class: "sendbar" }, [h("b", { text: nsel + " selecionado" + (nsel > 1 ? "s" : "") }), h("span", { style: "flex:1" }), h("button", { text: "Limpar", onclick: function () { S.sel = {}; renderTable(); } }), h("button", { class: "primary", text: "Enviar para a produção \u203A", onclick: openSend })]) : "";
   var tbl = document.getElementById("tbl"); tbl.onscroll = closeMenu; tbl.replaceChildren(h("table", {}, [h("thead", {}, [trh]), tb]));
+  var old = document.querySelector(".sendbar"); if (old) old.remove();
+  if (bar) tbl.before(bar);
 }
 
 var MENU = null;
@@ -241,6 +269,109 @@ async function setPot(c, id) {
     if (id) c.customFieldItems.push({ idCustomField: S.pot.id, idValue: id });
     renderTable();
   } catch (e) { msg("Não salvou (" + e.message + ")."); }
+}
+
+/* ---------- enviar para a produção ---------- */
+function iso(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function parseDay(v) { var p = v.split("-"); return new Date(+p[0], +p[1] - 1, +p[2], 12, 0, 0); }
+function addD(d, n) { var x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function offIdx(name) { return OFFSETS.findIndex(function (o) { return o[0].test(name.trim()); }); }
+async function getJ(path) { var r = await fetch("https://api.trello.com/1" + path + (path.indexOf("?") < 0 ? "?" : "&") + "key=" + APP_KEY + "&token=" + S.token); if (!r.ok) throw new Error(r.status); return r.json(); }
+async function openSend() {
+  if (!S.token && !(await authorize())) return;
+  var ov = h("div", { class: "ov" }, [h("div", { class: "panel" }, [h("p", { class: "note", text: "Carregando…" })])]);
+  document.body.append(ov);
+  try {
+    var ids = Object.keys(S.sel).filter(function (id) { return S.cards.some(function (c) { return c.id === id; }); });
+    var r = await Promise.all([getJ("/boards/" + PROD.board + "/members?fields=fullName"), getJ("/boards/" + PROD.board + "/lists?fields=name"), getJ("/boards/" + PROD.board + "/customFields"), getJ("/checklists/" + TPL_CHECKLIST + "?checkItems=all"), t.get("board", "private", "envio")]);
+    var members = r[0], plists = r[1], pcf = r[2], tplItems = r[3].checkItems.sort(function (a, b) { return a.pos - b.pos; }).map(function (i) { return i.name; }), mem = r[4] || {};
+    var dest = plists.find(function (l) { return PROD.list.test(l.name); }) || plists[0];
+    var postF = pcf.find(function (f) { return f.type === "date" && /postag/i.test(f.name); });
+    var jobs = [];
+    for (var i = 0; i < ids.length; i++) {
+      var c = S.cards.find(function (x) { return x.id === ids[i]; });
+      var cls = await getJ("/cards/" + c.id + "/checklists");
+      var cl = cls.find(function (x) { return !/aprova/i.test(x.name); });
+      var items = cl ? cl.checkItems.sort(function (a, b) { return a.pos - b.pos; }).map(function (it) { return { id: it.id, name: it.name }; }) : tplItems.map(function (n) { return { id: null, name: n }; });
+      jobs.push({ card: c, items: items, needChecklist: !cl });
+    }
+    var panel = h("div", { class: "panel" }, [
+      h("h2", { text: "Enviar " + ids.length + " tema" + (ids.length > 1 ? "s" : "") + " para a produção" }),
+      h("p", { class: "note", text: "Vão para a lista " + dest.name + ". Escolha a data de postagem; os prazos de cada etapa se ajustam sozinhos (dá para mudar). Quem fica em cada etapa é lembrado por projeto para a próxima vez." })
+    ]);
+    jobs.forEach(function (j) {
+      var lab = project(j.card), cc = col(lab && lab.color), labKey = lab ? lab.id.slice(-6) : "_";
+      var post = h("input", { type: "date", "aria-label": "Data de postagem" });
+      var rows = h("tbody");
+      j.rows = j.items.map(function (it) {
+        var k = offIdx(it.name), key = labKey + ":" + k;
+        var sel = h("select", { "aria-label": "Responsável por " + it.name }, [h("option", { value: "", text: "— ninguém —" })].concat(members.map(function (m) { var o = h("option", { value: m.id, text: m.fullName }); if (mem[key] === m.id) o.selected = true; return o; })));
+        var due = h("input", { type: "date", "aria-label": "Prazo de " + it.name });
+        due.addEventListener("change", function () { due._manual = true; });
+        rows.append(h("tr", {}, [h("td", { text: it.name }), h("td", {}, [sel]), h("td", {}, [due])]));
+        return { it: it, sel: sel, due: due, k: k, key: key };
+      });
+      function fill() {
+        if (!post.value) return;
+        var pd = parseDay(post.value);
+        j.rows.forEach(function (x) { if (x.due._manual) return; var o = OFFSETS[x.k] ? OFFSETS[x.k][1] : -1; x.due.value = iso(o === null ? new Date() : addD(pd, o)); });
+      }
+      post.addEventListener("change", fill);
+      /* se o tema já tem data de postagem no Brainstorm, ela vem preenchida */
+      var bpf = (S.board.customFields || []).find(function (f) { return f.type === "date" && /postag/i.test(f.name); });
+      var bpi = bpf && (j.card.customFieldItems || []).find(function (i) { return i.idCustomField === bpf.id; });
+      if (bpi && bpi.value && bpi.value.date) { post.value = iso(new Date(bpi.value.date)); fill(); }
+      j.post = post; j.status = h("span", { class: "st" });
+      panel.append(h("div", { class: "sc" }, [
+        h("div", { class: "hd" }, [lab ? h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: lab.name }) : "", h("b", { text: j.card.name }), h("label", { class: "note" }, ["Postagem ", post]), j.status]),
+        h("table", {}, [rows])
+      ]));
+    });
+    var go = h("button", { class: "primary", text: "Enviar para " + dest.name });
+    var cancel = h("button", { text: "Cancelar", onclick: function () { ov.remove(); } });
+    var info = h("span", { class: "note" });
+    panel.append(h("div", { class: "foot" }, [info, cancel, go]));
+    ov.replaceChildren(panel);
+    go.addEventListener("click", async function () {
+      if (jobs.some(function (j) { return !j.post.value; })) { info.textContent = "Coloque a data de postagem em todos."; info.className = "note err"; return; }
+      go.disabled = true; cancel.disabled = true; info.className = "note"; info.textContent = "Enviando…";
+      var okAll = true;
+      for (var n = 0; n < jobs.length; n++) {
+        var j = jobs[n];
+        try { await sendOne(j, dest, postF, mem); j.status.textContent = "✓ enviado"; delete S.sel[j.card.id]; }
+        catch (e) { okAll = false; j.status.textContent = "não foi (" + e.message + ")"; j.status.style.color = "#ae2e24"; }
+      }
+      try { await t.set("board", "private", "envio", mem); } catch (e) {}
+      info.textContent = okAll ? "Pronto. Os temas já estão em " + dest.name + "." : "Alguns não foram; veja acima.";
+      cancel.disabled = false; cancel.textContent = "Fechar"; cancel.onclick = function () { ov.remove(); load(); };
+    });
+  } catch (e) { ov.replaceChildren(h("div", { class: "panel" }, [h("p", { class: "err", text: "Não deu para abrir o envio (" + e.message + ")." }), h("button", { text: "Fechar", onclick: function () { ov.remove(); } })])); }
+}
+async function sendOne(j, dest, postF, mem) {
+  var c = j.card, cid = c.id;
+  /* o porquê fica registrado como comentário; os campos do quadro de temas não vão junto */
+  var why = whyOf(c);
+  if (why) await api("POST", "/cards/" + cid + "/actions/comments", { text: "Por quê / Potencial (do Brainstorm de Temas): " + why });
+  for (var i = 0; i < (c.customFieldItems || []).length; i++) {
+    var fi = c.customFieldItems[i], f = (S.board.customFields || []).find(function (x) { return x.id === fi.idCustomField; });
+    await api("PUT", "/cards/" + cid + "/customField/" + fi.idCustomField + "/item", f && f.type === "list" ? { idValue: "" } : { value: "" });
+  }
+  if (j.needChecklist) {
+    await api("POST", "/cards/" + cid + "/checklists", { idChecklistSource: TPL_CHECKLIST });
+    var cls = await getJ("/cards/" + cid + "/checklists");
+    var cl = cls.find(function (x) { return !/aprova/i.test(x.name); });
+    var its = cl.checkItems.sort(function (a, b) { return a.pos - b.pos; });
+    j.rows.forEach(function (x, i) { x.it.id = its[i] && its[i].id; });
+  }
+  await api("PUT", "/cards/" + cid, { idBoard: PROD.board, idList: dest.id, pos: "bottom" });
+  if (postF) await api("PUT", "/cards/" + cid + "/customField/" + postF.id + "/item", { value: { date: parseDay(j.post.value).toISOString() } });
+  for (var k = 0; k < j.rows.length; k++) {
+    var x = j.rows[k]; if (!x.it.id) continue;
+    var body = {};
+    if (x.sel.value) { body.idMember = x.sel.value; mem[x.key] = x.sel.value; }
+    if (x.due.value) body.due = parseDay(x.due.value).toISOString();
+    if (body.idMember || body.due) await api("PUT", "/cards/" + cid + "/checkItem/" + x.it.id, body);
+  }
 }
 
 load();

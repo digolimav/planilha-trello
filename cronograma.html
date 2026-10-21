@@ -47,7 +47,17 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .metas{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 14px;background:#fff}
 .metas .row{display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:6px}
 .metas label{display:inline-flex;align-items:center;gap:6px;font-size:13px}
-.metas input{width:52px;font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:6px}
+.metas input[type=time]{font:inherit;font-size:13px;padding:2px 6px;border:1px solid var(--line);border-radius:6px}
+.metas .ln{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:5px 0;border-top:1px dashed var(--line)}
+.metas .ln:first-of-type{border-top:0}
+.metas .ln .lab{width:130px}
+.dz{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.dz button{border:0;border-right:1px solid var(--line);border-radius:0;padding:3px 8px;font-size:12px;background:#fff}
+.dz button:last-child{border-right:0}
+.dz button[aria-pressed="true"]{background:#5b3a8c;color:#fff}
+.slot{display:block;border:1.5px dashed #e34935;color:#ae2e24;background:#fff5f4;border-radius:6px;padding:4px 6px;font-size:12px;font-weight:600;margin:0 0 4px}
+.slot.past{border-color:#c1c7d0;color:#8590a2;background:transparent;font-weight:400}
+.hr{font-size:10.5px;font-weight:600;color:var(--muted);margin-left:auto;white-space:nowrap;padding-left:4px}
 </style>
 </head>
 <body>
@@ -92,7 +102,20 @@ function addDays(x, n) { var d = new Date(x); d.setDate(d.getDate() + n); return
 function dd(x) { return String(x.getDate()).padStart(2, "0") + "/" + String(x.getMonth() + 1).padStart(2, "0"); }
 function short(name) { return name.replace(/^(ESP\s*-\s*)?(ROBOT|CELEBS|DUNKER|RIGHT TURN|MYSTERY|COMP|COMPILADO)\s*-\s*/i, function (m, esp) { return esp ? "ESP · " : ""; }); }
 
-var S = { week: 0, n: 1, metas: {}, showMetas: false, token: null, ext: [] };
+var S = { week: 0, n: 1, grade: {}, showMetas: false, token: null, ext: [] };
+/* cronograma fixo de cada canal (dias 0=Seg ... 6=Dom); vale até alguém mudar em "Cronograma dos canais" */
+var PADRAO = [
+  [/celebs/i, [3, 6], "12:00"],
+  [/not a robot|^inar/i, [3, 6], "12:00"],
+  [/no soy/i, [2, 6], "15:00"],
+  [/dunker/i, [5], ""],
+  [/robot man|robot-man/i, [2, 5], "12:00"]
+];
+function gradeOf(l) {
+  if (S.grade[l.id]) return S.grade[l.id];
+  var p = PADRAO.find(function (x) { return x[0].test(l.name); });
+  return p ? { d: p[1], h: p[2] } : { d: [], h: "" };
+}
 
 async function load() {
   try {
@@ -100,10 +123,10 @@ async function load() {
       t.board("id", "labels", "customFields"),
       t.lists("id", "name"),
       t.cards("id", "name", "labels", "idList", "url", "customFieldItems", "dueComplete"),
-      t.get("board", "shared", "metas"),
+      t.get("board", "shared", "grade"),
       t.get("board", "private", "cronograma")
     ]);
-    S.board = r[0]; S.lists = r[1]; S.cards = r[2]; S.metas = r[3] || {};
+    S.board = r[0]; S.lists = r[1]; S.cards = r[2]; S.grade = r[3] || {};
     var p = r[4] || {}; if (!S.loaded) { S.n = p.n || 1; S.loaded = true; }
     var cfs = S.board.customFields || [];
     S.post = cfs.find(function (f) { return f.type === "date" && /postag/i.test(f.name); });
@@ -180,12 +203,12 @@ function render() {
     S.week !== 0 ? h("button", { text: "Hoje", onclick: function () { S.week = 0; render(); } }) : null,
     modes,
     h("span", { class: "sp" }),
-    h("button", { text: S.showMetas ? "Fechar metas" : "Metas por canal", onclick: function () { S.showMetas = !S.showMetas; render(); } }),
+    h("button", { text: S.showMetas ? "Fechar" : "Cronograma dos canais", onclick: function () { S.showMetas = !S.showMetas; render(); } }),
     h("button", { text: "Atualizar", onclick: load })
   ]);
   var legend = h("div", { class: "legend" }, Object.keys(ST).map(function (k) {
     return h("span", {}, [h("i", { class: "dot", style: k === "ext" ? "border:1.5px dashed #8590a2;background:transparent" : "background:" + ST[k].c }), ST[k].n]);
-  }));
+  }).concat([h("span", {}, [h("i", { class: "dot", style: "border:1.5px dashed #e34935;background:#fff5f4;border-radius:3px" }), "Dia do cronograma sem vídeo"])]));
   var out = [bar];
   if (S.showMetas) out.push(metasBox());
   out.push(legend);
@@ -207,23 +230,28 @@ function weekGrid(W0) {
   chans.forEach(function (name) {
     var mine = items.filter(function (c) { return chanOf(c) === name; });
     var lab = labByName[name], cc = col(lab && lab.color);
-    var real = mine.filter(function (c) { return !c.ext; }).length, plan = mine.length;
-    var meta = lab ? +S.metas[lab.id] || 0 : 0;
+    var g = lab ? gradeOf(lab) : { d: [], h: "" };
+    var plan = mine.length;
     total += plan;
-    if (meta && plan < meta) gaps += meta - plan;
-    if (!meta && !plan) return; /* canal sem vídeo e sem meta não ocupa linha */
+    if (!g.d.length && !plan) return; /* canal sem vídeo e sem cronograma não ocupa linha */
+    var faltam = g.d.filter(function (dIdx) { var dt = addDays(W0, dIdx); return dt >= today && !mine.some(function (c) { return +postDate(c) === +dt; }); }).length;
+    gaps += faltam;
     grid.append(h("div", { class: "ch" }, [
       name === "_" ? h("span", { class: "lab", style: "background:#f1f2f4;color:#44546f", text: "Sem canal" }) : h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: name }),
-      h("span", { class: "cnt" + (meta && plan < meta ? " gap" : ""), text: meta ? plan + "/" + meta + " na semana" + (plan < meta ? " · falta " + (meta - plan) : "") : plan + " na semana" })
+      h("span", { class: "cnt" + (faltam ? " gap" : ""), text: g.d.length ? plan + "/" + g.d.length + " na semana" + (faltam ? " · falta " + faltam : "") : plan + " na semana" })
     ]));
     for (var d2 = 0; d2 < 7; d2++) {
       var dt2 = addDays(W0, d2);
       var cell = h("div", { class: "cell" + (+dt2 === +today ? " today" : dt2 < today ? " past" : "") });
-      mine.filter(function (c) { return +postDate(c) === +dt2; }).forEach(function (c) {
+      var inDay = mine.filter(function (c) { return +postDate(c) === +dt2; });
+      var isSlot = g.d.indexOf(d2) >= 0;
+      if (isSlot && !inDay.length) cell.append(h("span", { class: "slot" + (dt2 < today ? " past" : ""), text: (dt2 < today ? "Sem vídeo" : "Falta vídeo") + (g.h ? " · " + g.h : "") }));
+      inDay.forEach(function (c) {
         var st = status(c);
         var b = h("button", { class: "it" + (c.ext ? " ext" : "") + (st === "posted" ? " done" : ""), title: c.name + (c.ext ? " (no Brainstorm)" : " — " + listName(c.idList)) }, [
           h("i", { class: "dot", style: c.ext ? "border:1.5px dashed #8590a2;background:transparent" : "background:" + ST[st].c }),
-          h("span", { class: "t", text: short(c.name) })
+          h("span", { class: "t", text: short(c.name) }),
+          isSlot && g.h ? h("span", { class: "hr", text: g.h }) : ""
         ]);
         b.addEventListener("click", function () { if (c.ext) window.open(c.url, "_blank"); else t.showCard(c.id); });
         cell.append(b);
@@ -239,26 +267,34 @@ function weekGrid(W0) {
     h("p", { class: "sum" }, [h("b", { text: String(total) }), " vídeo" + (total === 1 ? "" : "s"),
       ext ? " (" + ext + " ainda no Brainstorm)" : "",
       late ? h("span", { style: "color:#ae2e24;font-weight:600", text: " · " + late + " atrasado" + (late > 1 ? "s" : "") }) : "",
-      gaps ? h("span", { style: "color:#ae2e24;font-weight:600", text: " · faltam " + gaps + " para bater as metas" }) : ""])
+      gaps ? h("span", { style: "color:#ae2e24;font-weight:600", text: " · " + gaps + " dia" + (gaps > 1 ? "s" : "") + " do cronograma sem vídeo" }) : ""])
   ]);
 }
 
 function metasBox() {
-  var box = h("div", { class: "metas" }, [h("p", { class: "note", text: "Quantos vídeos cada canal deve postar por semana. Quando a semana tem menos, o canal fica marcado em vermelho." })]);
-  var row = h("div", { class: "row" });
+  var box = h("div", { class: "metas" }, [h("p", { class: "note", text: "Em que dias e horário cada canal posta. Dia do cronograma sem vídeo aparece em vermelho na grade." })]);
   channels().forEach(function (l) {
-    var cc = col(l.color);
-    var inp = h("input", { type: "number", min: "0", max: "14", value: S.metas[l.id] || "", "aria-label": "Meta semanal de " + l.name });
-    inp.addEventListener("change", async function () {
-      var v = parseInt(inp.value, 10);
-      if (v > 0) S.metas[l.id] = v; else delete S.metas[l.id];
-      try { await t.set("board", "shared", "metas", S.metas); } catch (e) {}
-      render();
+    var cc = col(l.color), g = gradeOf(l);
+    var dz = h("div", { class: "dz", role: "group", "aria-label": "Dias de " + l.name });
+    DIAS.forEach(function (nm, i) {
+      dz.append(h("button", { "aria-pressed": g.d.indexOf(i) >= 0 ? "true" : "false", text: nm, onclick: function () {
+        var d = g.d.indexOf(i) >= 0 ? g.d.filter(function (x) { return x !== i; }) : g.d.concat([i]).sort();
+        saveGrade(l, { d: d, h: g.h });
+      } }));
     });
-    row.append(h("label", {}, [h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name }), inp]));
+    var tm = h("input", { type: "time", value: g.h || "", "aria-label": "Horário de " + l.name });
+    tm.addEventListener("change", function () { saveGrade(l, { d: g.d, h: tm.value }); });
+    box.append(h("div", { class: "ln" }, [h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name }), dz, tm]));
   });
-  box.append(row);
   return box;
+}
+async function saveGrade(l, g) {
+  /* grava a grade inteira (inclusive o padrão dos outros canais) para todos verem o mesmo */
+  var all = {};
+  channels().forEach(function (x) { var v = x.id === l.id ? g : gradeOf(x); all[x.id] = { d: v.d, h: v.h }; });
+  S.grade = all;
+  try { await t.set("board", "shared", "grade", all); } catch (e) {}
+  render();
 }
 
 load();

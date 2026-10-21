@@ -236,9 +236,11 @@ function weekGrid(W0) {
     if (!g.d.length && !plan) return; /* canal sem vídeo e sem cronograma não ocupa linha */
     var faltam = g.d.filter(function (dIdx) { var dt = addDays(W0, dIdx); return dt >= today && !mine.some(function (c) { return +postDate(c) === +dt; }); }).length;
     gaps += faltam;
+    var cobertos = g.d.filter(function (dIdx) { var dt = addDays(W0, dIdx); return mine.some(function (c) { return +postDate(c) === +dt; }); }).length;
+    var fora = mine.filter(function (c) { return g.d.indexOf((postDate(c).getDay() + 6) % 7) < 0; }).length;
     grid.append(h("div", { class: "ch" }, [
       name === "_" ? h("span", { class: "lab", style: "background:#f1f2f4;color:#44546f", text: "Sem canal" }) : h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: name }),
-      h("span", { class: "cnt" + (faltam ? " gap" : ""), text: g.d.length ? plan + "/" + g.d.length + " na semana" + (faltam ? " · falta " + faltam : "") : plan + " na semana" })
+      h("span", { class: "cnt" + (faltam ? " gap" : ""), text: g.d.length ? cobertos + "/" + g.d.length + " dias" + (fora ? " + " + fora + " fora do dia" : "") + (faltam ? " · falta " + faltam : "") : plan + " na semana" })
     ]));
     for (var d2 = 0; d2 < 7; d2++) {
       var dt2 = addDays(W0, d2);

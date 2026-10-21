@@ -112,6 +112,12 @@ if (VIEW !== "table") {
         callback: function (t) {
           return t.modal({ url: base + "?view=table&v=" + Date.now(), fullscreen: true, title: "Planilha" });
         }
+      }, {
+        icon: { dark: ICON, light: ICON },
+        text: "Cronograma",
+        callback: function (t) {
+          return t.modal({ url: dir + "cronograma.html?v=" + Date.now(), fullscreen: true, title: "Cronograma" });
+        }
       }];
       if (/rodrigo/i.test(m.fullName || "")) B.push({
         icon: { dark: ICON, light: ICON },

@@ -207,7 +207,6 @@ function startTable() {
   function extOk(c) {
     var q = S.q.trim().toLowerCase();
     if (q && c.name.toLowerCase().indexOf(q) < 0) return false;
-    if (S.listSel.length) return false;
     if (S.labels.length) {
       var names = (S.board.labels || []).filter(function (l) { return S.labels.indexOf(l.id) >= 0; }).map(function (l) { return l.name; });
       if (!c.labels.some(function (l) { return names.indexOf(l.name) >= 0; })) return false;

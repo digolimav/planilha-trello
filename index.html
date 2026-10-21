@@ -179,9 +179,10 @@ function startTable() {
       S.fields = cfs.filter(function (f) { return f.type === "list"; });
       S.postField = cfs.find(function (f) { return f.type === "date" && /postag/i.test(f.name); }) || null;
       try { if (APP_KEY && await t.getRestApi().isAuthorized()) S.token = await t.getRestApi().getToken(); } catch (e) {}
-      if (S.token) { try { await syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: null, call: api, boardId: S.board.id }); } catch (e) {} }
       await loadBrainstorm();
       render();
+      /* acerta os status pela lista em segundo plano; quando muda algo, redesenha a tabela */
+      if (S.token) syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: null, call: api, boardId: S.board.id }).then(function (n) { if (n) renderTable(); }, function () {});
     } catch (e) {
       app.replaceChildren(h("p", { class: "err", text: "Não foi possível ler o quadro: " + (e && e.message || e) }));
     }

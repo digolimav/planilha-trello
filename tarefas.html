@@ -141,6 +141,8 @@ async function load() {
     if (!cr.ok) throw new Error(cr.status);
     S.checks = {};
     (await cr.json()).forEach(function (c) { S.checks[c.id] = c.checklists || []; });
+    render();
+    /* acerta os status pela lista e pelo checklist em segundo plano, depois redesenha */
     try { await syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: S.checks, call: api, boardId: S.board.id }); } catch (e) {}
     await reconcile();
     render();

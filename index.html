@@ -73,10 +73,10 @@ select.st{appearance:none;-webkit-appearance:none;width:100%;min-width:120px;fon
 .menu button:hover,.menu button:focus{background:var(--soft);outline:none}
 .menu .chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:13px}
 .menu .ok{color:var(--accent);font-size:13px}
-.ov{position:fixed;inset:0;z-index:60;background:rgba(9,30,66,.45);display:flex;justify-content:center;align-items:flex-start;padding:24px;overflow:auto}
-.panel{background:#fff;border-radius:12px;max-width:900px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(9,30,66,.35)}
+.ov{position:fixed;inset:0;z-index:60;background:rgba(9,30,66,.45);padding:24px;overflow:auto}
+.panel{background:#fff;border-radius:12px;max-width:900px;margin:0 auto;box-sizing:border-box;padding:18px 20px;box-shadow:0 12px 40px rgba(9,30,66,.35)}
 .panel h2{margin:0 0 4px;font-size:17px}
-table.rules{min-width:0}
+table.rules{min-width:0;width:100%}
 table.rules td{padding:5px 10px}
 table.rules td.rl{font-weight:600;white-space:nowrap}
 table.rules select{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
@@ -528,7 +528,7 @@ function startTable() {
       tr.append(h("td", { style: "text-align:center" }, [cb]));
       tb.append(tr); rows.push(row);
     });
-    var trh = h("tr", {}, [h("th", { text: "Quando o cartão está em…" })].concat(fields.map(function (x) { return h("th", { text: x.f.name }); })).concat([h("th", { text: "Cartão concluído" })]));
+    var trh = h("tr", {}, [h("th", { text: "Quando o cartão está em…" })].concat(fields.map(function (x) { return h("th", { text: x.f.name }); })).concat([h("th", { text: "Concluir cartão", class: "nosort" })]));
     var info = h("span", { class: "note" });
     var ov = h("div", { class: "ov" });
     var save = h("button", { class: "primary", text: "Salvar regras", disabled: !edit, onclick: async function () {

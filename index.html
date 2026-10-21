@@ -49,6 +49,9 @@ td.name .nm{display:flex;align-items:flex-start;gap:10px}
 td.name input.ok{width:16px;height:16px;margin:2px 0 0;flex:none;cursor:pointer;accent-color:#1f845a}
 tr.done td{background:#fafbfc}
 tr.done td>*{opacity:.45}
+tr.ext td{background:#fafbfc;color:var(--muted)}
+tr.ext td.name a{color:var(--muted);font-style:italic}
+.xtag{display:inline-block;font-size:11px;font-weight:600;color:#5e4db2;background:#f3f0ff;border-radius:4px;padding:1px 6px;margin-left:6px;font-style:normal}
 tr.done td.name a{text-decoration:line-through}
 tr.nodate td{cursor:pointer;background:#fff7e6;color:#7f5f01}
 .toggle{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);cursor:pointer;white-space:nowrap}
@@ -170,6 +173,7 @@ function startTable() {
       S.fields = cfs.filter(function (f) { return f.type === "list"; });
       S.postField = cfs.find(function (f) { return f.type === "date" && /postag/i.test(f.name); }) || null;
       try { if (APP_KEY && await t.getRestApi().isAuthorized()) S.token = await t.getRestApi().getToken(); } catch (e) {}
+      await loadBrainstorm();
       render();
     } catch (e) {
       app.replaceChildren(h("p", { class: "err", text: "Não foi possível ler o quadro: " + (e && e.message || e) }));
@@ -181,7 +185,37 @@ function startTable() {
   function optOf(f, id) { return (f.options || []).find(function (o) { return o.id === id; }); }
   function optText(o) { return o ? (o.value && o.value.text) || "" : ""; }
   function listName(id) { var l = S.lists.find(function (x) { return x.id === id; }); return l ? l.name : ""; }
+  /* temas do Brainstorm que já têm data de postagem aparecem na semana deles, só para ver */
+  var BRAIN = "6ad78bf2e6a07b19369b36e6";
+  async function loadBrainstorm() {
+    S.ext = [];
+    if (!S.token || S.board.id === BRAIN) return;
+    try {
+      var r = await Promise.all([api("GET", "/boards/" + BRAIN + "/customFields"), api("GET", "/boards/" + BRAIN + "/lists?fields=name"), api("GET", "/boards/" + BRAIN + "/cards?fields=name,labels,idList,url&customFieldItems=true")]);
+      var bf = await r[0].json(), bl = await r[1].json(), bc = await r[2].json();
+      var pf = bf.find(function (f) { return f.type === "date" && /postag/i.test(f.name); });
+      if (!pf) return;
+      bc.forEach(function (c) {
+        if (/^TEMPLATE/i.test(c.name)) return;
+        var l = bl.find(function (x) { return x.id === c.idList; });
+        if (l && /descart/i.test(l.name)) return;
+        var it = (c.customFieldItems || []).find(function (i) { return i.idCustomField === pf.id; });
+        if (it && it.value && it.value.date) S.ext.push({ id: c.id, name: c.name, labels: c.labels || [], url: c.url, ext: true, extDate: new Date(it.value.date), extList: l ? l.name : "" });
+      });
+    } catch (e) {}
+  }
+  function extOk(c) {
+    var q = S.q.trim().toLowerCase();
+    if (q && c.name.toLowerCase().indexOf(q) < 0) return false;
+    if (S.listSel.length) return false;
+    if (S.labels.length) {
+      var names = (S.board.labels || []).filter(function (l) { return S.labels.indexOf(l.id) >= 0; }).map(function (l) { return l.name; });
+      if (!c.labels.some(function (l) { return names.indexOf(l.name) >= 0; })) return false;
+    }
+    return true;
+  }
   function postDate(card) {
+    if (card.ext) return card.extDate;
     if (S.postField) { var it = item(card, S.postField); if (it && it.value && it.value.date) return new Date(it.value.date); return null; }
     return card.due ? new Date(card.due) : null;
   }
@@ -330,7 +364,8 @@ function startTable() {
     return true;
   }
   function visibleCards() {
-    var out = S.cards.filter(function (c) { return baseFilter(c) && inPeriod(postDate(c)); });
+    var out = S.cards.filter(function (c) { return baseFilter(c) && inPeriod(postDate(c)); })
+      .concat((S.ext || []).filter(function (c) { return extOk(c) && inPeriod(c.extDate); }));
     out.sort(function (a, b) { return postDate(a) - postDate(b); });
     return out;
   }
@@ -390,9 +425,10 @@ function startTable() {
   function renderTable() {
     var cards = visibleCards(), noDate = noDateCards();
     var now = Date.now();
-    var counts = document.getElementById("counts"); counts.replaceChildren(h("span", {}, [h("b", { text: String(cards.length) }), " vídeos"]));
+    var nExt = cards.filter(function (c) { return c.ext; }).length;
+    var counts = document.getElementById("counts"); counts.replaceChildren(h("span", {}, [h("b", { text: String(cards.length - nExt) }), " vídeos", nExt ? " · " : "", nExt ? h("b", { text: String(nExt) }) : "", nExt ? " ainda no Brainstorm" : ""]));
     S.fields.forEach(function (f) {
-      var pend = cards.filter(function (c) { var t2 = optText(optOf(f, valueOf(c, f))).toLowerCase(); return t2.indexOf("conclu") < 0; }).length;
+      var pend = cards.filter(function (c) { return !c.ext; }).filter(function (c) { var t2 = optText(optOf(f, valueOf(c, f))).toLowerCase(); return t2.indexOf("conclu") < 0; }).length;
       counts.append(h("span", {}, [f.name + ": ", h("b", { text: String(pend) }), " em aberto"]));
     });
     var heads = ["Vídeo", "Projeto", "Postagem"].concat(S.fields.map(function (f) { return f.name; }));
@@ -400,6 +436,16 @@ function startTable() {
     var tb = h("tbody"), lastWeek = null;
     function row(c) {
       var pd = postDate(c);
+      if (c.ext) {
+        var wd = DIAS[pd.getDay()].charAt(0).toUpperCase() + DIAS[pd.getDay()].slice(1);
+        tb.append(h("tr", { class: "ext" }, [
+          h("td", { class: "name" }, [h("div", { class: "nm" }, [h("span", { style: "width:16px;flex:none" }), h("div", {}, [h("a", { href: c.url, target: "_blank", rel: "noopener", text: c.name }), h("span", { class: "xtag", text: "no Brainstorm" }), h("span", { class: "sub", text: (c.extList ? c.extList + " · " : "") + "ainda não enviado" })])])]),
+          h("td", { class: "fit" }, c.labels.map(function (l) { var cc = col(l.color); return h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1] + ";opacity:.7", text: l.name || " " }); })),
+          h("td", { class: "fit" }, [h("span", { class: "datebtn" }, [h("span", { class: "wd", text: wd }), h("span", { text: dd(pd) })])]),
+          h("td", { colspan: Math.max(1, S.fields.length), class: "note", text: "Envie pela Planilha de temas quando chegar a semana." })
+        ]));
+        return;
+      }
       var postCell;
       var wdTxt = pd ? DIAS[pd.getDay()].charAt(0).toUpperCase() + DIAS[pd.getDay()].slice(1) : "";
       if (S.postField) {

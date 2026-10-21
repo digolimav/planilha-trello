@@ -62,6 +62,8 @@ td.ck input{width:16px;height:16px;cursor:pointer;margin-top:3px}
 .sc select,.sc input[type=date]{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
 .sc .st{font-size:12px;color:var(--muted)}
 .foot{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:12px}
+.sc.bulk{border-color:#85b8ff}
+.sc.bulk .hd{background:#e9f2ff}
 </style>
 </head>
 <body>
@@ -323,12 +325,46 @@ async function openSend() {
       var bpf = (S.board.customFields || []).find(function (f) { return f.type === "date" && /postag/i.test(f.name); });
       var bpi = bpf && (j.card.customFieldItems || []).find(function (i) { return i.idCustomField === bpf.id; });
       if (bpi && bpi.value && bpi.value.date) { post.value = iso(new Date(bpi.value.date)); fill(); }
-      j.post = post; j.status = h("span", { class: "st" });
+      j.post = post; j.fill = fill; j.status = h("span", { class: "st" });
       panel.append(h("div", { class: "sc" }, [
         h("div", { class: "hd" }, [lab ? h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: lab.name }) : "", h("b", { text: j.card.name }), h("label", { class: "note" }, ["Postagem ", post]), j.status]),
         h("table", {}, [rows])
       ]));
     });
+    /* com mais de um tema: preencher todos de uma vez (mesma pessoa e mesma data em cada etapa) */
+    if (jobs.length > 1) {
+      var ks = [];
+      jobs.forEach(function (j) { j.rows.forEach(function (x) { if (!ks.some(function (y) { return y.k === x.k; })) ks.push({ k: x.k, name: x.it.name }); }); });
+      var bp = h("input", { type: "date", "aria-label": "Postagem para todos" });
+      var brows = h("tbody");
+      var bs = ks.map(function (y) {
+        var sel = h("select", { "aria-label": "Responsável por " + y.name + " em todos" }, [h("option", { value: "", text: "— não mudar —" })].concat(members.map(function (m) { return h("option", { value: m.id, text: m.fullName }); })));
+        var due = h("input", { type: "date", "aria-label": "Prazo de " + y.name + " em todos" });
+        brows.append(h("tr", {}, [h("td", { text: y.name }), h("td", {}, [sel]), h("td", {}, [due])]));
+        return { k: y.k, sel: sel, due: due };
+      });
+      var bmsg = h("span", { class: "st" });
+      var apply = h("button", { class: "primary", text: "Aplicar a todos" });
+      apply.addEventListener("click", function () {
+        jobs.forEach(function (j) {
+          if (bp.value) { j.post.value = bp.value; j.fill(); }
+          bs.forEach(function (b) {
+            j.rows.filter(function (x) { return x.k === b.k; }).forEach(function (x) {
+              if (b.sel.value) x.sel.value = b.sel.value;
+              if (b.due.value) { x.due.value = b.due.value; x.due._manual = true; }
+            });
+          });
+        });
+        bmsg.textContent = "✓ aplicado nos " + jobs.length + " temas (dá para ajustar um por um abaixo)";
+      });
+      var bulk = h("div", { class: "sc bulk" }, [
+        h("div", { class: "hd" }, [h("b", { text: "Para todos os " + jobs.length + " temas" }), h("label", { class: "note" }, ["Postagem ", bp]), apply, bmsg]),
+        h("table", {}, [brows]),
+        h("p", { class: "note", style: "padding:6px 12px 8px", text: "Deixe o prazo vazio para ele ser calculado pela data de postagem de cada tema." })
+      ]);
+      var firstSc = panel.querySelector(".sc");
+      if (firstSc) panel.insertBefore(bulk, firstSc); else panel.append(bulk);
+    }
     var go = h("button", { class: "primary", text: "Enviar para " + dest.name });
     var cancel = h("button", { text: "Cancelar", onclick: function () { ov.remove(); } });
     var info = h("span", { class: "note" });

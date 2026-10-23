@@ -576,7 +576,7 @@ function startTable() {
     if (S.q.trim()) return [];
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var all = S.cards.concat(S.ext || []);
-    var end = period === "esta" ? W1 : addDays(W1, 7), max = addDays(W0, 56);
+    var end = period === "esta" ? W1 : addDays(W1, 7), max = addDays(W0, 21);
     if (period !== "esta") all.forEach(function (c) { var d = postDate(c); if (d && d >= end && d < max) { var e = addDays(monday(d), 7); if (e > end) end = e; } });
     var out = [];
     chanLabels().forEach(function (l) {

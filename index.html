@@ -81,6 +81,17 @@ table.rules td{padding:5px 10px}
 table.rules td.rl{font-weight:600;white-space:nowrap}
 table.rules select{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
 .foot{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:12px;flex-wrap:wrap}
+tr.gap td{background:#ffeceb;border-top-color:#f5c2bd}
+tr.gap td b{color:#ae2a19}
+tr.gap .sub{color:#ae2a19}
+tr.gap .datebtn{color:#ae2a19;font-weight:600}
+.gapc,.gapc b,.gapw{color:#ae2a19}
+.gl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 0;border-top:1px dashed var(--line)}
+.gl .lab{min-width:130px;text-align:center}
+.dz{display:inline-flex;gap:3px;flex-wrap:wrap}
+.dz button{padding:3px 9px;font-size:12px}
+.dz button[aria-pressed="true"]{background:#5b3a8c;color:#fff;border-color:#5b3a8c}
+.gl input[type=time]{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px}
 </style>
 </head>
 <body>
@@ -119,12 +130,6 @@ if (VIEW !== "table") {
         text: "Planilha",
         callback: function (t) {
           return t.modal({ url: base + "?view=table&v=" + Date.now(), fullscreen: true, title: "Planilha" });
-        }
-      }, {
-        icon: { dark: ICON, light: ICON },
-        text: "Cronograma",
-        callback: function (t) {
-          return t.modal({ url: dir + "cronograma.html?v=" + Date.now(), fullscreen: true, title: "Cronograma" });
         }
       }];
       if (/rodrigo/i.test(m.fullName || "")) B.push({
@@ -181,6 +186,7 @@ function startTable() {
       ]);
       S.board = r[0]; S.lists = r[1]; S.cards = r[2];
       try { S.regras = (await t.get("board", "shared", "regras")) || {}; var me = await t.member("fullName"); S.admin = /rodrigo/i.test(me.fullName || ""); } catch (e) { S.regras = {}; }
+      try { S.grade = (await t.get("board", "shared", "grade")) || {}; } catch (e) { S.grade = {}; }
       if (!S.prefsLoaded) { await loadPrefs(); S.prefsLoaded = true; }
       S.labels = S.labels.filter(function (id) { return (S.board.labels || []).some(function (l) { return l.id === id; }); });
       S.listSel = S.listSel.filter(function (id) { return S.lists.some(function (l) { return l.id === id; }); });
@@ -321,6 +327,7 @@ function startTable() {
     return true;
   }
   function postDate(card) {
+    if (card.gap) return card.date;
     if (card.ext) return card.extDate;
     if (S.postField) { var it = item(card, S.postField); if (it && it.value && it.value.date) return new Date(it.value.date); return null; }
     return card.due ? new Date(card.due) : null;
@@ -550,6 +557,72 @@ function startTable() {
   }
 
 
+  /* ---------- cronograma dos canais: dias fixos de cada canal; dia do cronograma sem vídeo vira linha vermelha ---------- */
+  var PADRAO = [
+    [/celebs/i, [3, 6], "12:00"],
+    [/not a robot|^inar/i, [3, 6], "12:00"],
+    [/no soy/i, [2, 6], "15:00"],
+    [/dunker/i, [5], ""],
+    [/robot man|robot-man/i, [2, 5], "12:00"]
+  ];
+  var DSEM = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+  function chanLabels() { return (S.board.labels || []).filter(function (l) { return l.name && !/travado/i.test(l.name); }); }
+  function gradeOf(l) {
+    if (S.grade && S.grade[l.id]) return S.grade[l.id];
+    var p = PADRAO.find(function (x) { return x[0].test(l.name); });
+    return p ? { d: p[1], h: p[2] } : { d: [], h: "" };
+  }
+  function gapRows() {
+    if (S.q.trim()) return [];
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var all = S.cards.concat(S.ext || []);
+    var end = period === "esta" ? W1 : addDays(W1, 7), max = addDays(W0, 56);
+    if (period !== "esta") all.forEach(function (c) { var d = postDate(c); if (d && d >= end && d < max) { var e = addDays(monday(d), 7); if (e > end) end = e; } });
+    var out = [];
+    chanLabels().forEach(function (l) {
+      if (S.labels.length && S.labels.indexOf(l.id) < 0) return;
+      var g = gradeOf(l); if (!g.d || !g.d.length) return;
+      for (var w = new Date(W0); w < end; w = addDays(w, 7)) g.d.forEach(function (di) {
+        var dt = addDays(w, di); if (dt < today || dt >= end) return;
+        var has = all.some(function (c) { var d = postDate(c); return d && iso(d) === iso(dt) && (c.labels || []).some(function (x) { return x.name === l.name; }); });
+        if (!has) out.push({ gap: true, lab: l, h: g.h, date: dt });
+      });
+    });
+    return out;
+  }
+  async function saveGrade(l, g) {
+    var all = {};
+    chanLabels().forEach(function (x) { var v = x.id === l.id ? g : gradeOf(x); all[x.id] = { d: v.d, h: v.h }; });
+    S.grade = all;
+    try { await t.set("board", "shared", "grade", all); } catch (e) {}
+  }
+  function openGrade() {
+    var ov = h("div", { class: "ov" }), box = h("div", { class: "panel" });
+    function close() { ov.remove(); renderTable(); }
+    function draw() {
+      var kids = [h("h2", { text: "Cronograma dos canais" }), h("p", { class: "note", text: "Em que dias e horário cada canal posta. Dia marcado que ainda não tem vídeo aparece em vermelho na Planilha." })];
+      chanLabels().forEach(function (l) {
+        var cc = col(l.color), g = gradeOf(l);
+        var dz = h("div", { class: "dz", role: "group", "aria-label": "Dias de " + l.name });
+        DSEM.forEach(function (nm, i) {
+          dz.append(h("button", { "aria-pressed": g.d.indexOf(i) >= 0 ? "true" : "false", text: nm, onclick: function () {
+            var d = g.d.indexOf(i) >= 0 ? g.d.filter(function (x) { return x !== i; }) : g.d.concat([i]).sort();
+            saveGrade(l, { d: d, h: g.h }).then(draw);
+          } }));
+        });
+        var tm = h("input", { type: "time", value: g.h || "", "aria-label": "Horário de " + l.name });
+        tm.addEventListener("change", function () { saveGrade(l, { d: g.d, h: tm.value }).then(draw); });
+        kids.push(h("div", { class: "gl" }, [h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: l.name }), dz, tm]));
+      });
+      kids.push(h("div", { class: "foot" }, [h("button", { class: "primary", text: "Fechar", onclick: close })]));
+      box.replaceChildren.apply(box, kids);
+    }
+    draw();
+    ov.addEventListener("mousedown", function (e) { if (e.target === ov) close(); });
+    ov.append(box);
+    document.body.append(ov);
+  }
+
   function render() {
     var labels = (S.board.labels || []).filter(function (l) { return l.name; });
     var chips = h("div", { class: "chips", role: "group", "aria-label": "Período" });
@@ -564,6 +637,7 @@ function startTable() {
       (function () { var cb = h("input", { type: "checkbox" }); cb.checked = S.hideDone; cb.addEventListener("change", function () { S.hideDone = cb.checked; savePrefs(); renderTable(); }); return h("label", { class: "toggle" }, [cb, "Ocultar concluídos"]); })(),
       h("span", { class: "sp" }),
       S.token || !APP_KEY ? null : h("button", { class: "primary", text: "Autorizar edição", onclick: authorize }),
+      h("button", { text: "Cronograma", title: "Dias e horário de postagem de cada canal", onclick: openGrade }),
       h("button", { text: "Regras", title: "Regras automáticas de status por lista", onclick: openRules }),
       h("button", { text: "Atualizar", onclick: load })
     ]);
@@ -573,7 +647,8 @@ function startTable() {
   }
 
   function renderTable() {
-    var cards = visibleCards(), noDate = noDateCards();
+    var cards = visibleCards(), noDate = noDateCards(), gaps = gapRows();
+    var all = cards.concat(gaps).sort(function (a, b) { return (postDate(a) - postDate(b)) || ((a.gap ? 1 : 0) - (b.gap ? 1 : 0)); });
     var now = Date.now();
     var nExt = cards.filter(function (c) { return c.ext; }).length;
     var counts = document.getElementById("counts"); counts.replaceChildren(h("span", {}, [h("b", { text: String(cards.length - nExt) }), " vídeos", nExt ? " · " : "", nExt ? h("b", { text: String(nExt) }) : "", nExt ? " ainda no Brainstorm" : ""]));
@@ -581,11 +656,22 @@ function startTable() {
       var pend = cards.filter(function (c) { return !c.ext; }).filter(function (c) { var t2 = optText(optOf(f, valueOf(c, f))).toLowerCase(); return t2.indexOf("conclu") < 0; }).length;
       counts.append(h("span", {}, [f.name + ": ", h("b", { text: String(pend) }), " em aberto"]));
     });
+    if (gaps.length) counts.append(h("span", { class: "gapc" }, [h("b", { text: String(gaps.length) }), gaps.length === 1 ? " dia do cronograma sem vídeo" : " dias do cronograma sem vídeo"]));
     var heads = ["Vídeo", "Projeto", "Postagem"].concat(S.fields.map(function (f) { return f.name; }));
     var trh = h("tr"); heads.forEach(function (x, i) { trh.append(h("th", { class: "nosort" + (i === 1 || i === 2 ? " fit" : ""), text: x })); });
     var tb = h("tbody"), lastWeek = null;
     function row(c) {
       var pd = postDate(c);
+      if (c.gap) {
+        var gc = col(c.lab.color), gwd = DIAS[pd.getDay()].charAt(0).toUpperCase() + DIAS[pd.getDay()].slice(1);
+        tb.append(h("tr", { class: "gap" }, [
+          h("td", { class: "name" }, [h("div", { class: "nm" }, [h("span", { style: "width:16px;flex:none" }), h("div", {}, [h("b", { text: "Falta vídeo" }), h("span", { class: "sub", text: "Dia do cronograma do " + c.lab.name + " ainda sem vídeo" })])])]),
+          h("td", { class: "fit" }, [h("span", { class: "lab", style: "background:" + gc[0] + ";color:" + gc[1], text: c.lab.name })]),
+          h("td", { class: "fit" }, [h("span", { class: "datebtn" }, [h("span", { class: "wd", text: gwd }), h("span", { text: dd(pd) + (c.h ? " · " + c.h : "") })])]),
+          h("td", { colspan: Math.max(1, S.fields.length) })
+        ]));
+        return;
+      }
       if (c.ext) {
         var wd = DIAS[pd.getDay()].charAt(0).toUpperCase() + DIAS[pd.getDay()].slice(1);
         tb.append(h("tr", { class: "ext" }, [
@@ -613,16 +699,17 @@ function startTable() {
       S.fields.forEach(function (f) { tr.append(h("td", {}, [statusSelect(c, f)])); });
       tb.append(tr);
     }
-    cards.forEach(function (c) {
+    all.forEach(function (c) {
       var wk = +monday(postDate(c));
       if (wk !== lastWeek) {
         var n = cards.filter(function (x) { return +monday(postDate(x)) === wk; }).length;
-        tb.append(h("tr", { class: "grp" }, [h("td", { colspan: heads.length, text: weekLabel(new Date(wk)) + " · " + n })]));
+        var ng = gaps.filter(function (x) { return +monday(x.date) === wk; }).length;
+        tb.append(h("tr", { class: "grp" }, [h("td", { colspan: heads.length }, [weekLabel(new Date(wk)) + " · " + n, ng ? h("span", { class: "gapw", text: " · falta " + ng }) : null])]));
         lastWeek = wk;
       }
       row(c);
     });
-    if (!cards.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum vídeo com data nesse período." })]));
+    if (!all.length) tb.append(h("tr", {}, [h("td", { colspan: heads.length, class: "note", text: "Nenhum vídeo com data nesse período." })]));
     if (period === "todos" && noDate.length) {
       tb.append(h("tr", { class: "grp nodate", onclick: function () { S.showNoDate = !S.showNoDate; renderTable(); } }, [h("td", { colspan: heads.length, text: (S.showNoDate ? "▾ " : "▸ ") + "Sem data de postagem · " + noDate.length + (S.showNoDate ? "" : " (clique para abrir)") })]));
       if (S.showNoDate) noDate.forEach(row);

@@ -143,7 +143,7 @@ async function load() {
     (await cr.json()).forEach(function (c) { S.checks[c.id] = c.checklists || []; });
     render();
     /* acerta os status pela lista e pelo checklist em segundo plano, depois redesenha */
-    try { var regras = (await t.get("board", "shared", "regras")) || {}; await syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: S.checks, call: api, boardId: S.board.id, saved: regras }); } catch (e) {}
+    try { var regras = (await t.get("board", "shared", "regras")) || {}; await syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: S.checks, call: api, boardId: S.board.id, saved: regras, labels: S.board.labels }); } catch (e) {}
     await reconcile();
     render();
   } catch (e) {
@@ -275,6 +275,19 @@ var DEFAULT_RULES = [
   [/aprovad/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Em execução" }],
   [/postado/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Publicado", done: true }]
 ];
+/* canais automatizados (o app faz roteiro, tradução e edição juntos): regras próprias, escolhidas na tela de Regras */
+var AUTO_RE = /mystery|bean/i;
+var AUTO_DEFAULT = [
+  [/fila.*edi/i, { R: "Em execução", T: "Em execução", E: "Em execução" }],
+  [/editando/i, { R: "Em execução", T: "Em execução", E: "Em execução" }],
+  [/revis.*v[ií]deo/i, { R: "Concluído", T: "Concluído", E: "Revisar" }],
+  [/aprovad/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Em execução" }],
+  [/postado/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Publicado", done: true }]
+];
+function autoLabels(labels, saved) {
+  if (saved && saved._auto && saved._auto.labels) return saved._auto.labels;
+  return (labels || []).filter(function (l) { return l.name && AUTO_RE.test(l.name); }).map(function (l) { return l.id; });
+}
 function statusRank(txt) {
   if (!txt || /n[aã]o inic/i.test(txt)) return 0;
   if (/conclu|publicad/i.test(txt)) return 4;
@@ -283,17 +296,18 @@ function statusRank(txt) {
   return 1;
 }
 /* regras por lista: as salvas no quadro ou o padrão */
-function rulesFor(lists, saved) {
+function rulesFor(lists, saved, defs) {
   var out = {};
   lists.forEach(function (l) {
     if (saved && saved[l.id]) { out[l.id] = saved[l.id]; return; }
-    var d = DEFAULT_RULES.find(function (x) { return x[0].test(l.name); });
+    var d = (defs || DEFAULT_RULES).find(function (x) { return x[0].test(l.name); });
     if (d) out[l.id] = d[1];
   });
   return out;
 }
 async function syncByList(o) {
   var rules = rulesFor(o.lists, o.saved);
+  var autoR = rulesFor(o.lists, o.saved && o.saved._auto && o.saved._auto.rules, AUTO_DEFAULT), autoIds = autoLabels(o.labels, o.saved);
   var last = o.lists.findIndex(function (l) { return /postado/i.test(l.name); });
   var cut = new Date(); cut.setDate(cut.getDate() - 30);
   var today = new Date(); today.setHours(0, 0, 0, 0);
@@ -303,7 +317,9 @@ async function syncByList(o) {
     var pd = o.postDate(c); if (!pd || pd < cut) return;
     var li = o.lists.findIndex(function (l) { return l.id === c.idList; });
     if (li < 0 || (last >= 0 && li > last)) return;
-    if (rules[c.idList]) todo.push({ c: c, r: rules[c.idList], writing: /escrevendo/i.test(o.lists[li].name) });
+    var isAuto = (c.labels || []).some(function (x) { return autoIds.indexOf(x.id) >= 0; });
+    var rr = (isAuto ? autoR : rules)[c.idList];
+    if (rr) todo.push({ c: c, r: rr, writing: /escrevendo/i.test(o.lists[li].name) });
   });
   if (!todo.length) return 0;
   var checks = o.checklists;

@@ -81,6 +81,9 @@ table.rules td{padding:5px 10px}
 table.rules td.rl{font-weight:600;white-space:nowrap}
 table.rules select{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
 .foot{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:12px;flex-wrap:wrap}
+.autolabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 8px}
+.achip{border:2px solid transparent;cursor:pointer;opacity:.4;padding:3px 8px}
+.achip[aria-pressed="true"]{opacity:1;border-color:#172b4d}
 tr.gap td{background:#ffeceb;border-top-color:#f5c2bd}
 tr.gap td b{color:#ae2a19}
 tr.gap .sub{color:#ae2a19}
@@ -197,7 +200,7 @@ function startTable() {
       await loadBrainstorm();
       render();
       /* acerta os status pela lista em segundo plano; quando muda algo, redesenha a tabela */
-      if (S.token) syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: null, call: api, boardId: S.board.id, saved: S.regras }).then(function (n) { if (n) renderTable(); }, function () {});
+      if (S.token) syncByList({ cards: S.cards, lists: S.lists, fields: S.board.customFields, postDate: postDate, checklists: null, call: api, boardId: S.board.id, saved: S.regras, labels: S.board.labels }).then(function (n) { if (n) renderTable(); }, function () {});
     } catch (e) {
       app.replaceChildren(h("p", { class: "err", text: "Não foi possível ler o quadro: " + (e && e.message || e) }));
     }
@@ -227,6 +230,19 @@ function startTable() {
     [/aprovad/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Em execução" }],
     [/postado/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Publicado", done: true }]
   ];
+  /* canais automatizados (o app faz roteiro, tradução e edição juntos): regras próprias, escolhidas na tela de Regras */
+  var AUTO_RE = /mystery|bean/i;
+  var AUTO_DEFAULT = [
+    [/fila.*edi/i, { R: "Em execução", T: "Em execução", E: "Em execução" }],
+    [/editando/i, { R: "Em execução", T: "Em execução", E: "Em execução" }],
+    [/revis.*v[ií]deo/i, { R: "Concluído", T: "Concluído", E: "Revisar" }],
+    [/aprovad/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Em execução" }],
+    [/postado/i, { R: "Concluído", T: "Concluído", E: "Concluído", P: "Publicado", done: true }]
+  ];
+  function autoLabels(labels, saved) {
+    if (saved && saved._auto && saved._auto.labels) return saved._auto.labels;
+    return (labels || []).filter(function (l) { return l.name && AUTO_RE.test(l.name); }).map(function (l) { return l.id; });
+  }
   function statusRank(txt) {
     if (!txt || /n[aã]o inic/i.test(txt)) return 0;
     if (/conclu|publicad/i.test(txt)) return 4;
@@ -235,17 +251,18 @@ function startTable() {
     return 1;
   }
   /* regras por lista: as salvas no quadro ou o padrão */
-  function rulesFor(lists, saved) {
+  function rulesFor(lists, saved, defs) {
     var out = {};
     lists.forEach(function (l) {
       if (saved && saved[l.id]) { out[l.id] = saved[l.id]; return; }
-      var d = DEFAULT_RULES.find(function (x) { return x[0].test(l.name); });
+      var d = (defs || DEFAULT_RULES).find(function (x) { return x[0].test(l.name); });
       if (d) out[l.id] = d[1];
     });
     return out;
   }
   async function syncByList(o) {
     var rules = rulesFor(o.lists, o.saved);
+    var autoR = rulesFor(o.lists, o.saved && o.saved._auto && o.saved._auto.rules, AUTO_DEFAULT), autoIds = autoLabels(o.labels, o.saved);
     var last = o.lists.findIndex(function (l) { return /postado/i.test(l.name); });
     var cut = new Date(); cut.setDate(cut.getDate() - 30);
     var today = new Date(); today.setHours(0, 0, 0, 0);
@@ -255,7 +272,9 @@ function startTable() {
       var pd = o.postDate(c); if (!pd || pd < cut) return;
       var li = o.lists.findIndex(function (l) { return l.id === c.idList; });
       if (li < 0 || (last >= 0 && li > last)) return;
-      if (rules[c.idList]) todo.push({ c: c, r: rules[c.idList], writing: /escrevendo/i.test(o.lists[li].name) });
+      var isAuto = (c.labels || []).some(function (x) { return autoIds.indexOf(x.id) >= 0; });
+      var rr = (isAuto ? autoR : rules)[c.idList];
+      if (rr) todo.push({ c: c, r: rr, writing: /escrevendo/i.test(o.lists[li].name) });
     });
     if (!todo.length) return 0;
     var checks = o.checklists;
@@ -515,8 +534,11 @@ function startTable() {
   }
 
   /* ---------- tela de regras automáticas (só o Rodrigo edita) ---------- */
-  function openRules() {
-    var rules = rulesFor(S.lists, S.regras);
+  function openRules(mode) {
+    mode = mode === "auto" ? "auto" : "padrao";
+    var auto = mode === "auto", saved = S.regras || {};
+    var rules = auto ? rulesFor(S.lists, saved._auto && saved._auto.rules, AUTO_DEFAULT) : rulesFor(S.lists, saved);
+    var selLabels = autoLabels(S.board.labels, saved).slice();
     var last = S.lists.findIndex(function (l) { return /postado/i.test(l.name); });
     var lists = S.lists.slice(0, last >= 0 ? last + 1 : S.lists.length);
     var fields = FIELD_KEYS.map(function (fk) { return { k: fk[0], f: (S.board.customFields || []).find(function (x) { return x.type === "list" && fk[1].test(x.name); }) }; }).filter(function (x) { return x.f; });
@@ -538,18 +560,46 @@ function startTable() {
     var trh = h("tr", {}, [h("th", { text: "Quando o cartão está em…" })].concat(fields.map(function (x) { return h("th", { text: x.f.name }); })).concat([h("th", { text: "Concluir cartão", class: "nosort" })]));
     var info = h("span", { class: "note" });
     var ov = h("div", { class: "ov" });
-    var save = h("button", { class: "primary", text: "Salvar regras", disabled: !edit, onclick: async function () {
+    var tabs = h("div", { class: "chips", role: "group", "aria-label": "Tipo de canal" }, [["padrao", "Canais normais"], ["auto", "Canais automatizados"]].map(function (m) {
+      return h("button", { "aria-pressed": m[0] === mode ? "true" : "false", text: m[1], onclick: function () { ov.remove(); openRules(m[0]); } });
+    }));
+    var chipsBox = null;
+    if (auto) {
+      chipsBox = h("div", { class: "autolabs" }, [h("span", { class: "note", text: "Canais automatizados:" })].concat(chanLabels().map(function (l) {
+        var cc = col(l.color);
+        var b = h("button", { class: "lab achip", "aria-pressed": selLabels.indexOf(l.id) >= 0 ? "true" : "false", disabled: !edit, style: "background:" + cc[0] + ";color:" + cc[1], text: l.name, onclick: function () {
+          var i = selLabels.indexOf(l.id); if (i >= 0) selLabels.splice(i, 1); else selLabels.push(l.id);
+          b.setAttribute("aria-pressed", selLabels.indexOf(l.id) >= 0 ? "true" : "false");
+        } });
+        return b;
+      })));
+    }
+    async function store(obj, msg) {
+      try { await t.set("board", "shared", "regras", obj); S.regras = obj; info.textContent = msg; info.className = "note"; return true; }
+      catch (e) { info.textContent = "Não salvou (" + e.message + ")."; info.className = "note err"; return false; }
+    }
+    var save = h("button", { class: "primary", text: "Salvar regras", disabled: !edit, onclick: function () {
       var out = {};
       rows.forEach(function (row) { var o = {}; Object.keys(row.sels).forEach(function (k) { if (row.sels[k].value) o[k] = row.sels[k].value; }); if (row.done.checked) o.done = true; out[row.id] = o; });
-      try { await t.set("board", "shared", "regras", out); S.regras = out; info.textContent = "Salvo. Vale a partir da próxima vez que a Planilha ou o Tarefas abrirem."; info.className = "note"; }
-      catch (e) { info.textContent = "Não salvou (" + e.message + ")."; info.className = "note err"; }
+      var cur = S.regras || {}, obj;
+      if (auto) { obj = Object.assign({}, cur, { _auto: { labels: selLabels, rules: out } }); }
+      else { obj = out; if (cur._auto) obj._auto = cur._auto; }
+      store(obj, "Salvo. Vale a partir da próxima vez que a Planilha ou o Tarefas abrirem.");
     } });
     var reset = h("button", { text: "Voltar ao padrão", disabled: !edit, onclick: async function () {
-      try { await t.set("board", "shared", "regras", {}); S.regras = {}; ov.remove(); openRules(); } catch (e) {}
+      var cur = S.regras || {}, obj;
+      if (auto) { obj = Object.assign({}, cur); delete obj._auto; }
+      else { obj = cur._auto ? { _auto: cur._auto } : {}; }
+      if (await store(obj, "")) { ov.remove(); openRules(mode); }
     } });
+    var txt = auto
+      ? "Para os canais em que o app faz roteiro, tradução e edição juntos. Valem no lugar das regras normais só para os cartões com a etiqueta desses canais. O que já está mais adiantado não volta."
+      : "Quando o cartão está na lista da esquerda, cada etapa fica pelo menos no status escolhido. O que já está mais adiantado não volta. Quando uma etapa vira Concluído, os itens dela no checklist são marcados. Em ESCREVENDO, o roteiro vira Atrasado se passou do prazo do item do roteiro.";
     ov.append(h("div", { class: "panel" }, [
       h("h2", { text: "Regras automáticas" }),
-      h("p", { class: "note", text: "Quando o cartão está na lista da esquerda, cada etapa fica pelo menos no status escolhido. O que já está mais adiantado não volta. Quando uma etapa vira Concluído, os itens dela no checklist são marcados. Em ESCREVENDO, o roteiro vira Atrasado se passou do prazo do item do roteiro." + (edit ? "" : " Só o Rodrigo pode mudar as regras.") }),
+      h("div", { style: "margin:8px 0" }, [tabs]),
+      h("p", { class: "note", text: txt + (edit ? "" : " Só o Rodrigo pode mudar as regras.") }),
+      chipsBox,
       h("div", { class: "wrap", style: "margin-top:10px" }, [h("table", { class: "rules" }, [h("thead", {}, [trh]), tb])]),
       h("div", { class: "foot" }, [info, reset, h("button", { text: "Fechar", onclick: function () { ov.remove(); } }), save])
     ]));

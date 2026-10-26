@@ -163,6 +163,7 @@ async function load() {
     S.admin = ADMINS.some(function (re) { return re.test(S.member.fullName || ""); });
     var pref = r[3] || {};
     S.person = S.admin ? (pref.person || "") : S.member.id;
+    S.views = pref.views || {};
     var cfs = S.board.customFields || [];
     S.postField = cfs.find(function (f) { return f.type === "date" && /postag/i.test(f.name); });
     SECTIONS.forEach(function (s) { s.field = s.f ? cfs.find(function (f) { return f.type === "list" && s.f.test(f.name); }) : null; });
@@ -440,7 +441,10 @@ function buildTasks() {
   return { tasks: out, W0: W0 };
 }
 
-function savePref() { try { t.set("board", "private", "tarefas", { person: S.person }); } catch (e) {} }
+function savePref() { try { t.set("board", "private", "tarefas", { person: S.person, views: S.views }); } catch (e) {} }
+/* formato da tela: Agenda (por dia) ou Lista (por etapa); cada um escolhe e fica salvo. Padrão: Todos em agenda, uma pessoa em lista */
+function viewKey() { return S.admin && !S.person ? "all" : "one"; }
+function curView() { return (S.views && S.views[viewKey()]) || (viewKey() === "all" ? "agenda" : "lista"); }
 
 function render() {
   var b = buildTasks(), tasks = b.tasks, W0 = b.W0;
@@ -454,6 +458,13 @@ function render() {
       h("span", { text: (S.week === 0 ? "Esta semana" : S.week === 1 ? "Próxima semana" : S.week === -1 ? "Semana passada" : "Semana") + " · " + dd(W0) + " a " + dd(addDays(W0, 6)) }),
       h("button", { "aria-label": "Próxima semana", text: "›", onclick: function () { S.week++; render(); } })
     ]),
+    (function () {
+      var ch = h("div", { class: "chips", role: "group", "aria-label": "Formato" });
+      [["agenda", "Agenda"], ["lista", "Lista"]].forEach(function (v) {
+        ch.append(h("button", { "aria-pressed": curView() === v[0] ? "true" : "false", text: v[1], onclick: function () { S.views = S.views || {}; S.views[viewKey()] = v[0]; savePref(); render(); } }));
+      });
+      return ch;
+    })(),
     !S.admin ? null : (function () {
       var ch = h("div", { class: "chips", role: "group", "aria-label": "Pessoa" });
       [""].concat(people).forEach(function (p) {
@@ -476,7 +487,10 @@ function render() {
     });
   }
   var grid = h("div", { class: "grid" });
-  if (S.admin && !S.person) grid = tasks.length ? dayBoard(tasks, W0) : h("div");
+  if (curView() === "agenda") {
+    var mineT = S.person ? tasks.filter(function (x) { return x.who === S.person; }) : tasks;
+    grid = mineT.length ? dayBoard(mineT, W0, !!S.person) : h("div");
+  }
   else (S.person ? [S.person] : people).forEach(function (p) {
     grid.append(personBlock(p, tasks.filter(function (x) { return x.who === p; })));
   });
@@ -542,7 +556,7 @@ function taskRow(x, showItem) {
 /* ---------- visão "Todos": uma coluna por dia (atrasados primeiro, prévia da próxima semana no fim) ---------- */
 var ETAPA = { A: ["Tema", "e-gen"], R: ["Roteiro", "e-rot"], RR: ["Revisão de roteiro", "e-rrev"], T: ["Tradução", "e-tra"], B: ["Brainstorm de thumb", "e-thu"], H: ["Thumb", "e-thu"], E: ["Edição", "e-edi"], V: ["Revisão de vídeo", "e-vrev"], M: ["Metadados", "e-gen"], P: ["Postagem", "e-pos"] };
 function pad2(n) { return String(n).padStart(2, "0"); }
-function dayBoard(tasks, W0) {
+function dayBoard(tasks, W0, single) {
   var wrap = h("div", { class: "dayscroll" }), board = h("div", { class: "days" });
   var today = day(new Date()), order = SECTIONS.map(function (s) { return s.k; });
   function sortItems(a) { return a.sort(function (x, y) { return (+x.due - +y.due) || (order.indexOf(x.sec.k) - order.indexOf(y.sec.k)) || memberName(x.who).localeCompare(memberName(y.who)); }); }
@@ -560,13 +574,13 @@ function dayBoard(tasks, W0) {
     ]);
     if (c.next) colEl.append(h("p", { class: "nextnote", text: "Prévia: o que já tem data. Ainda pode entrar mais coisa." }));
     if (!c.items.length) colEl.append(h("p", { class: "dempty", text: "Nada para este dia." }));
-    sortItems(c.items).forEach(function (x) { colEl.append(dayCard(x, c)); });
+    sortItems(c.items).forEach(function (x) { colEl.append(dayCard(x, c, single)); });
     board.append(colEl);
   });
   wrap.append(board);
   return wrap;
 }
-function dayCard(x, c) {
+function dayCard(x, c, single) {
   var lb = channelLabel(x.card), cc = col(lb && lb.color), st = x.st, sc = col(st.color);
   var et = ETAPA[x.sec.k] || [x.item.name, "e-gen"];
   var pill = h("button", { class: "pill", style: st.color ? "background:" + sc[0] + ";color:" + sc[1] : "background:#f1f2f4;color:#5e6c84", text: st.text });
@@ -576,7 +590,7 @@ function dayCard(x, c) {
   var tm = new Date(x.item.due), hm = (tm.getHours() || tm.getMinutes()) ? "até " + pad2(tm.getHours()) + ":" + pad2(tm.getMinutes()) : "";
   var when = c.pend ? "Era para " + DIAS[x.due.getDay()] + " " + dd(x.due) : c.next ? DIAS[x.due.getDay()] + " " + dd(x.due) + (hm ? " · " + hm : "") : hm;
   return h("div", { class: "k" + (st.done ? " done" : "") }, [
-    h("div", { class: "ktop" }, [h("span", { class: "et " + et[1], text: et[0] }), h("span", { class: "who", text: memberName(x.who) })]),
+    h("div", { class: "ktop" }, [h("span", { class: "et " + et[1], text: et[0] }), single ? "" : h("span", { class: "who", text: memberName(x.who) })]),
     h("a", { class: "kn", href: x.card.url, title: x.card.name, text: x.card.name, onclick: function (e) { e.preventDefault(); t.showCard(x.card.id); } }),
     h("div", { class: "kbot" }, [
       lb ? h("span", { class: "lab", style: "background:" + cc[0] + ";color:" + cc[1], text: lb.name }) : "",

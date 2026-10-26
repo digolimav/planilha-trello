@@ -217,12 +217,15 @@ function startTable() {
      Só mexe em vídeos com postagem dos últimos 30 dias para frente. */
   var TPL_CHECKLIST_ID = "6ad69a8e90a4f4636a5c41a4";
   var FIELD_KEYS = [["R", /roteir/i], ["T", /tradu/i], ["E", /edi[cç]/i], ["P", /publica/i]];
-  var RT = [/^tema/i, /brainstorm/i], RR = /produ.*rotei|^roteiro$/i;
+  /* o brainstorm de thumb nunca é marcado sozinho: só quando o brainstorm é enviado ao thumbmaker */
+  var RT = [/^tema/i], RR = /produ.*rotei|^roteiro$/i, RRV = /revis.*rotei/i;
   /* quando a etapa fica Concluída, estes itens do checklist são marcados */
-  var ITEMS_BY_FIELD = { R: [RR], T: [/revis.*rotei/i, /tradu/i], E: [/edi[cç]|montagem/i, /revis.*v[ií]deo/i], P: [/postag|publica/i] };
+  var ITEMS_BY_FIELD = { R: [RR, RRV], T: [/tradu/i], E: [/edi[cç]|montagem/i, /revis.*v[ií]deo/i], P: [/postag|publica/i] };
+  /* quando a etapa fica em Revisar, a produção dela já foi entregue: marca só o item de produção */
+  var ITEMS_AT_REVIEW = { R: [RR], E: [/edi[cç]|montagem/i] };
   var DEFAULT_RULES = [
     [/escrevendo/i, { R: "Em execução" }],
-    [/revis.*rotei/i, { R: "Concluído", T: "Em execução" }],
+    [/revis.*rotei/i, { R: "Revisar" }],
     [/^tradu/i, { R: "Concluído", T: "Em execução" }],
     [/fila.*edi/i, { R: "Concluído", T: "Concluído" }],
     [/editando/i, { R: "Concluído", T: "Concluído", E: "Em execução" }],
@@ -295,6 +298,7 @@ function startTable() {
       for (var k = 0; k < FIELD_KEYS.length; k++) {
         var key = FIELD_KEYS[k][0], txt = set[key]; if (!txt) continue;
         if (statusRank(txt) === 4) chk = chk.concat(ITEMS_BY_FIELD[key]);
+        else if (statusRank(txt) === 3 && ITEMS_AT_REVIEW[key]) chk = chk.concat(ITEMS_AT_REVIEW[key]);
         var f = (o.fields || []).find(function (x) { return x.type === "list" && FIELD_KEYS[k][1].test(x.name); });
         if (!f) continue;
         var cur = (c.customFieldItems || []).find(function (x) { return x.idCustomField === f.id; });
@@ -404,7 +408,7 @@ function startTable() {
 
   /* status concluído aqui = item marcado no checklist do cartão (e vice-versa no Tarefas) */
   var FIELD_ITEM = [
-    { f: /roteir/i, i: /roteir/i, not: /revis|tradu/i },
+    { f: /roteir/i, i: /roteir/i, not: /revis|tradu/i, rev: /revis.*rotei/i },
     { f: /tradu/i, i: /tradu/i },
     { f: /thumb/i, i: /thumb/i, not: /brainstorm/i },
     { f: /edi[cç]/i, i: /edi[cç]|montagem/i, not: /revis/i },
@@ -413,12 +417,18 @@ function startTable() {
   async function syncChecklist(card, f, idValue) {
     try {
       var m = FIELD_ITEM.find(function (x) { return x.f.test(f.name); }); if (!m) return;
-      var want = /conclu|publicad/i.test(optText(optOf(f, idValue))) ? "complete" : "incomplete";
+      var tx = optText(optOf(f, idValue));
+      /* no roteiro, Revisar já quer dizer roteiro entregue; Concluído quer dizer revisão feita */
+      var want = (/conclu|publicad/i.test(tx) || (m.rev && /revisar|corre/i.test(tx))) ? "complete" : "incomplete";
       var cls = await (await api("GET", "/cards/" + card.id + "/checklists?checkItem_fields=name,state")).json();
       var found = [];
       cls.forEach(function (cl) { if (/aprova/i.test(cl.name)) return; (cl.checkItems || []).forEach(function (it) { if (m.i.test(it.name) && !(m.not && m.not.test(it.name))) found.push(it); }); });
-      if (found.length !== 1 || found[0].state === want) return;
-      await api("PUT", "/cards/" + card.id + "/checkItem/" + found[0].id, { state: want });
+      if (found.length === 1 && found[0].state !== want) await api("PUT", "/cards/" + card.id + "/checkItem/" + found[0].id, { state: want });
+      if (m.rev) {
+        var rv = []; cls.forEach(function (cl) { if (/aprova/i.test(cl.name)) return; (cl.checkItems || []).forEach(function (it) { if (m.rev.test(it.name)) rv.push(it); }); });
+        var rw = /conclu/i.test(tx) ? "complete" : "incomplete";
+        if (rv.length === 1 && rv[0].state !== rw) await api("PUT", "/cards/" + card.id + "/checkItem/" + rv[0].id, { state: rw });
+      }
     } catch (e) {}
   }
 

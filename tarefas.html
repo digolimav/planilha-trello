@@ -197,6 +197,11 @@ async function putField(card, f, idValue) {
   card.customFieldItems = (card.customFieldItems || []).filter(function (i) { return i.idCustomField !== f.id; });
   card.customFieldItems.push({ idCustomField: f.id, idValue: idValue });
 }
+function cardItems(c) {
+  var out = [];
+  (S.checks[c.id] || []).forEach(function (cl) { if (IGNORE_CHECKLIST.test(cl.name)) return; (cl.checkItems || []).forEach(function (it) { out.push(it); }); });
+  return out;
+}
 /* o checklist manda: se alguém marcou ou desmarcou o item direto no cartão, o status da etapa acompanha */
 async function reconcile() {
   var jobs = [];
@@ -215,9 +220,20 @@ async function reconcile() {
     Object.keys(byField).forEach(function (k) {
       var g = byField[k]; if (g.items.length !== 1) return;
       var it = g.items[0], f = g.f;
-      var fdone = /conclu|publicad/i.test(optText(fieldOpt(c, f))), idone = it.state === "complete";
-      if (fdone === idone) return;
-      var target = idone ? findOpt(f, /conclu|publicad/i) : (findOpt(f, /execu|agendad/i) || findOpt(f, /n[aã]o inic/i));
+      var idone = it.state === "complete", target;
+      if (/roteir/i.test(f.name)) {
+        /* roteiro: entregue e sem a revisão feita = Revisar; revisão do roteiro feita = Concluído */
+        var cur = optText(fieldOpt(c, f));
+        var rev = cardItems(c).find(function (x) { return RRV.test(x.name.trim()); });
+        var want = !idone ? "open" : (rev && rev.state !== "complete" ? "rev" : "done");
+        var have = /conclu/i.test(cur) ? "done" : (/revisar|corre/i.test(cur) ? "rev" : "open");
+        if (want === have) return;
+        target = want === "done" ? findOpt(f, /conclu/i) : want === "rev" ? findOpt(f, /revisar/i) : (findOpt(f, /execu|agendad/i) || findOpt(f, /n[aã]o inic/i));
+      } else {
+        var fdone = /conclu|publicad/i.test(optText(fieldOpt(c, f)));
+        if (fdone === idone) return;
+        target = idone ? findOpt(f, /conclu|publicad/i) : (findOpt(f, /execu|agendad/i) || findOpt(f, /n[aã]o inic/i));
+      }
       if (target) jobs.push(putField(c, f, target.id).catch(function () {}));
     });
   });
@@ -262,12 +278,15 @@ function openMoveMenu(btn, x, sug) {
    Só mexe em vídeos com postagem dos últimos 30 dias para frente. */
 var TPL_CHECKLIST_ID = "6ad69a8e90a4f4636a5c41a4";
 var FIELD_KEYS = [["R", /roteir/i], ["T", /tradu/i], ["E", /edi[cç]/i], ["P", /publica/i]];
-var RT = [/^tema/i, /brainstorm/i], RR = /produ.*rotei|^roteiro$/i;
+/* o brainstorm de thumb nunca é marcado sozinho: só quando o brainstorm é enviado ao thumbmaker */
+var RT = [/^tema/i], RR = /produ.*rotei|^roteiro$/i, RRV = /revis.*rotei/i;
 /* quando a etapa fica Concluída, estes itens do checklist são marcados */
-var ITEMS_BY_FIELD = { R: [RR], T: [/revis.*rotei/i, /tradu/i], E: [/edi[cç]|montagem/i, /revis.*v[ií]deo/i], P: [/postag|publica/i] };
+var ITEMS_BY_FIELD = { R: [RR, RRV], T: [/tradu/i], E: [/edi[cç]|montagem/i, /revis.*v[ií]deo/i], P: [/postag|publica/i] };
+/* quando a etapa fica em Revisar, a produção dela já foi entregue: marca só o item de produção */
+var ITEMS_AT_REVIEW = { R: [RR], E: [/edi[cç]|montagem/i] };
 var DEFAULT_RULES = [
   [/escrevendo/i, { R: "Em execução" }],
-  [/revis.*rotei/i, { R: "Concluído", T: "Em execução" }],
+  [/revis.*rotei/i, { R: "Revisar" }],
   [/^tradu/i, { R: "Concluído", T: "Em execução" }],
   [/fila.*edi/i, { R: "Concluído", T: "Concluído" }],
   [/editando/i, { R: "Concluído", T: "Concluído", E: "Em execução" }],
@@ -340,6 +359,7 @@ async function syncByList(o) {
     for (var k = 0; k < FIELD_KEYS.length; k++) {
       var key = FIELD_KEYS[k][0], txt = set[key]; if (!txt) continue;
       if (statusRank(txt) === 4) chk = chk.concat(ITEMS_BY_FIELD[key]);
+      else if (statusRank(txt) === 3 && ITEMS_AT_REVIEW[key]) chk = chk.concat(ITEMS_AT_REVIEW[key]);
       var f = (o.fields || []).find(function (x) { return x.type === "list" && FIELD_KEYS[k][1].test(x.name); });
       if (!f) continue;
       var cur = (c.customFieldItems || []).find(function (x) { return x.idCustomField === f.id; });
@@ -511,11 +531,22 @@ async function setStatus(x, f, idValue) {
     card.customFieldItems = (card.customFieldItems || []).filter(function (i) { return i.idCustomField !== f.id; });
     if (idValue) card.customFieldItems.push({ idCustomField: f.id, idValue: idValue });
     var o = (f.options || []).find(function (op) { return op.id === idValue; });
-    var finished = /conclu|publicad/i.test(optText(o));
+    var tx = optText(o), isR = /roteir/i.test(f.name);
+    /* no roteiro, Revisar já quer dizer roteiro entregue */
+    var finished = /conclu|publicad/i.test(tx) || (isR && /revisar|corre/i.test(tx));
     var want = finished ? "complete" : "incomplete";
     if (x.item.state !== want) {
       var r2 = await fetch(base + "/checkItem/" + x.item.id + q, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: want }) });
       if (r2.ok) x.item.state = want;
+    }
+    if (isR) {
+      /* roteiro Concluído = revisão do roteiro feita; Revisar = revisão ainda a fazer */
+      var rv = cardItems(card).find(function (i) { return RRV.test(i.name.trim()); });
+      var rw = /conclu/i.test(tx) ? "complete" : "incomplete";
+      if (rv && rv.state !== rw) {
+        var r3 = await fetch(base + "/checkItem/" + rv.id + q, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: rw }) });
+        if (r3.ok) rv.state = rw;
+      }
     }
     render();
   } catch (e) { var n = document.getElementById("msg"); if (n) { n.textContent = "Não salvou (" + e.message + ")."; n.className = "note err"; } }
@@ -525,6 +556,7 @@ async function setDone(x, state) {
     var res = await fetch("https://api.trello.com/1/cards/" + x.card.id + "/checkItem/" + x.item.id + "?key=" + APP_KEY + "&token=" + S.token, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: state }) });
     if (!res.ok) throw new Error(res.status);
     x.item.state = state;
+    if (RRV.test(x.item.name.trim())) await reconcile();
     render();
   } catch (e) { var n = document.getElementById("msg"); if (n) { n.textContent = "Não salvou (" + e.message + ")."; n.className = "note err"; } }
 }

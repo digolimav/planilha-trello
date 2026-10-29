@@ -115,9 +115,9 @@ if (VIEW !== "table") {
   TrelloPowerUp.initialize({
     "board-buttons": function (t0) {
       var dir = base.replace(/index\.html$/, "").replace(/\/?$/, "/");
-      return Promise.all([t0.member("fullName"), t0.board("customFields")]).then(function (rr) { var m = rr[0];
-      /* quadro de temas (tem o campo Potencial): só a planilha de temas */
-      if ((rr[1].customFields || []).some(function (f) { return /potencial/i.test(f.name); })) return [{
+      return Promise.all([t0.member("fullName"), t0.board("id")]).then(function (rr) { var m = rr[0];
+      /* quadro Brainstorm de Temas (reconhecido pelo id, não por campo: cartões movidos levam os campos junto): só a planilha de temas */
+      if (rr[1].id === "6ad78bf2e6a07b19369b36e6") return [{
         icon: { dark: ICON, light: ICON },
         text: "Planilha de temas",
         callback: function (t) { return t.modal({ url: dir + "temas.html?v=" + Date.now(), fullscreen: true, title: "Temas" }); }
